@@ -10,6 +10,10 @@ const UnlockDef& Progression::def(int id) {
         {"Functions", 8},
         {"Carrot", 6},
         {"Expand", 10},
+        {"Watering", 8},
+        {"Fertilizer", 14},
+        {"Pumpkin", 12},
+        {"Polyculture", 16},
     }};
     static const UnlockDef unknown{"?", 0};
     if (id < 0 || id >= U_COUNT) return unknown;

@@ -17,6 +17,10 @@ enum Unlock : int {
     U_Functions,         // language: func
     U_Carrot,            // content: carrot crop
     U_Expand,            // world: larger farm
+    U_Watering,          // mechanic: watering speeds growth 2x
+    U_Fertilizer,        // mechanic: fertilize() instant-ripens
+    U_Pumpkin,           // content: pumpkin crop (high yield)
+    U_Polyculture,       // mechanic: companion-planting yield bonus
     U_COUNT
 };
 
@@ -39,6 +43,10 @@ public:
     farm::lang::FeatureSet feature_set() const;
 
     bool crop_carrot_unlocked() const { return is_unlocked(U_Carrot); }
+    bool crop_pumpkin_unlocked() const { return is_unlocked(U_Pumpkin); }
+    bool watering_unlocked() const { return is_unlocked(U_Watering); }
+    bool fertilizer_unlocked() const { return is_unlocked(U_Fertilizer); }
+    bool polyculture_unlocked() const { return is_unlocked(U_Polyculture); }
     int max_farm_size() const { return is_unlocked(U_Expand) ? 6 : 4; }
 
 private:

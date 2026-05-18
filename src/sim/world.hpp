@@ -9,7 +9,9 @@
 namespace farm::sim {
 
 enum Dir : int { North = 0, East = 1, South = 2, West = 3 };
-enum CropId : int { CropNone = 0, CropWheat = 1, CropCarrot = 2 };
+enum CropId : int {
+    CropNone = 0, CropWheat = 1, CropCarrot = 2, CropPumpkin = 3
+};
 
 // sense() result codes.
 enum Sensed : int { SenseWild = 0, SenseTilled = 1, SenseGrowing = 2,
@@ -22,7 +24,9 @@ struct Tile {
     bool watered = false; // reserved for later mechanics
 };
 
-int crop_maturity(int crop);  // ticks to ripen; 0 for CropNone
+int crop_maturity(int crop);     // ticks to ripen; 0 for CropNone
+int crop_base_yield(int crop);   // units gained on harvest
+int crop_companion(int crop);    // companion crop id (CropNone if none)
 
 class World {
 public:
@@ -49,8 +53,13 @@ public:
     bool till();          // false if already tilled
     bool plant(int crop); // false if not tilled / occupied / bad id
     bool water();
+    bool fertilize();     // instantly mature the crop here
     bool harvest();       // false if nothing mature here
     void wait() {}        // pure time pass
+
+    // Rule toggles (set by the host from the unlock tree).
+    void set_watering(bool on) { watering_ = on; }
+    void set_polyculture(bool on) { polyculture_ = on; }
 
     // ---- queries (no tick) ----
     int sense() const;
@@ -65,9 +74,13 @@ private:
     int idx(int x, int y) const { return y * w_ + x; }
     Tile& at(int x, int y) { return grid_[idx(x, y)]; }
 
+    bool companion_adjacent(int x, int y, int crop) const;
+
     int w_, h_;
     int rx_ = 0, ry_ = 0;
     uint64_t tick_ = 0;
+    bool watering_ = false;     // watered tiles grow 2x
+    bool polyculture_ = false;  // +1 yield next to companion crop
     std::vector<Tile> grid_;
     std::unordered_map<int, int64_t> inv_;
 };

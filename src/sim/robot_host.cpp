@@ -19,6 +19,13 @@ void RobotHost::consume_tick() {
 
 Value RobotHost::call(const std::string& name,
                       const std::vector<Value>& args) {
+    // Keep world growth rules in sync with the unlock tree so Tech-panel
+    // unlocks take effect immediately.
+    if (prog_) {
+        world_.set_watering(prog_->watering_unlocked());
+        world_.set_polyculture(prog_->polyculture_unlocked());
+    }
+
     // tick-consuming actions
     if (name == "move") {
         bool ok = world_.move(arg_int(args, 0, "move"));
@@ -32,9 +39,16 @@ Value RobotHost::call(const std::string& name,
     }
     if (name == "plant") {
         int crop = arg_int(args, 0, "plant");
-        bool locked = (crop == CropCarrot && prog_ &&
-                       !prog_->crop_carrot_unlocked());
+        bool locked = prog_ &&
+            ((crop == CropCarrot && !prog_->crop_carrot_unlocked()) ||
+             (crop == CropPumpkin && !prog_->crop_pumpkin_unlocked()));
         bool ok = !locked && world_.plant(crop);
+        consume_tick();
+        return Value::B(ok);
+    }
+    if (name == "fertilize") {
+        bool locked = prog_ && !prog_->fertilizer_unlocked();
+        bool ok = !locked && world_.fertilize();
         consume_tick();
         return Value::B(ok);
     }
