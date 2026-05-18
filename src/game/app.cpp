@@ -4,7 +4,10 @@
 
 #include "imgui.h"
 #include "imgui_stdlib.h"
+#include "imnodes.h"
+#include "blueprint/codec.hpp"
 #include "lang/parser.hpp"
+#include "lang/printer.hpp"
 #include "vm/compiler.hpp"
 
 namespace farm::game {
@@ -40,6 +43,8 @@ void App::rebuild() {
     vm_.reset();
     try {
         lang::Program prog = lang::parse(source_);
+        graph_ = blueprint::build(prog);  // blueprint view of this program
+        graph_laid_ = false;
         chunk_ = std::make_unique<vm::Chunk>(vm::compile(prog));
         world_ = std::make_unique<sim::World>(kW, kH);
         host_ = std::make_unique<sim::RobotHost>(*world_);
@@ -74,6 +79,7 @@ void App::frame() {
     draw_controls();
     draw_editor();
     draw_farm();
+    draw_blueprint();
 }
 
 void App::draw_controls() {
@@ -162,6 +168,157 @@ void App::draw_farm() {
     dl->AddCircle(c, cell * 0.30f, IM_COL32(255, 255, 255, 255), 0, 2.0f);
 
     ImGui::Dummy({kW * cell, kH * cell});
+    ImGui::End();
+}
+
+namespace {
+
+const char* op_text(farm::lang::Tok t) {
+    using farm::lang::Tok;
+    switch (t) {
+        case Tok::KwOr: return "or";   case Tok::KwAnd: return "and";
+        case Tok::KwNot: return "not"; case Tok::Eq: return "==";
+        case Tok::Ne: return "!=";     case Tok::Lt: return "<";
+        case Tok::Le: return "<=";     case Tok::Gt: return ">";
+        case Tok::Ge: return ">=";     case Tok::Plus: return "+";
+        case Tok::Minus: return "-";   case Tok::Star: return "*";
+        case Tok::Slash: return "/";   case Tok::Percent: return "%";
+        default: return "?";
+    }
+}
+
+std::string node_label(const farm::blueprint::Node& n) {
+    using farm::blueprint::NK;
+    switch (n.kind) {
+        case NK::Entry: return "Entry";
+        case NK::Assign: return "Set " + n.name;
+        case NK::CallStmt: return n.name + "()";
+        case NK::If: return "If";
+        case NK::While: return "While";
+        case NK::Repeat: return "Repeat";
+        case NK::Return: return "Return";
+        case NK::FuncDef: return "func " + n.name;
+        case NK::IntLit: return std::to_string(n.ival);
+        case NK::BoolLit: return n.bval ? "true" : "false";
+        case NK::VarGet: return n.name;
+        case NK::Unary: return op_text(n.op);
+        case NK::Binary: return op_text(n.op);
+        case NK::CallExpr: return n.name + "()";
+    }
+    return "?";
+}
+
+// Attribute-id slots (unique per node: index*64 + slot).
+inline int pin(int node_index, int slot) { return node_index * 64 + slot; }
+constexpr int kExecIn = 1, kExecOut = 2, kBranchA = 3, kBranchB = 4,
+              kValOut = 5, kValIn0 = 8;
+
+bool has_exec_in(farm::blueprint::NK k) {
+    using farm::blueprint::NK;
+    return k == NK::Assign || k == NK::CallStmt || k == NK::If ||
+           k == NK::While || k == NK::Repeat || k == NK::Return ||
+           k == NK::FuncDef;
+}
+
+}  // namespace
+
+void App::draw_blueprint() {
+    ImGui::SetNextWindowPos({380, 560}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({660, 230}, ImGuiCond_FirstUseEver);
+    ImGui::Begin("Blueprint");
+
+    if (ImGui::Button("Regenerate code from blueprint")) {
+        try {
+            source_ = lang::print(blueprint::to_ast(graph_));
+            rebuild();
+        } catch (const std::exception& e) {
+            error_ = e.what();
+        }
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("(read-only view; editing arrives in M5)");
+
+    ImNodes::BeginNodeEditor();
+    const auto& ns = graph_.nodes;
+
+    for (size_t i = 0; i < ns.size(); ++i) {
+        const blueprint::Node& n = ns[i];
+        int ni = static_cast<int>(i);
+        if (!graph_laid_)
+            ImNodes::SetNodeGridSpacePos(ni, ImVec2(n.x, n.y));
+
+        ImNodes::BeginNode(ni);
+        ImNodes::BeginNodeTitleBar();
+        ImGui::TextUnformatted(node_label(n).c_str());
+        ImNodes::EndNodeTitleBar();
+
+        if (has_exec_in(n.kind)) {
+            ImNodes::BeginInputAttribute(pin(ni, kExecIn));
+            ImGui::TextUnformatted("in");
+            ImNodes::EndInputAttribute();
+        }
+        for (size_t k = 0; k < n.in.size(); ++k) {
+            ImNodes::BeginInputAttribute(pin(ni, kValIn0 + (int)k));
+            ImGui::Text("arg%zu", k);
+            ImNodes::EndInputAttribute();
+        }
+        // value output for expression nodes
+        if (n.kind == blueprint::NK::IntLit ||
+            n.kind == blueprint::NK::BoolLit ||
+            n.kind == blueprint::NK::VarGet ||
+            n.kind == blueprint::NK::Unary ||
+            n.kind == blueprint::NK::Binary ||
+            n.kind == blueprint::NK::CallExpr) {
+            ImNodes::BeginOutputAttribute(pin(ni, kValOut));
+            ImGui::TextUnformatted("val");
+            ImNodes::EndOutputAttribute();
+        }
+        if (n.kind != blueprint::NK::IntLit &&
+            n.kind != blueprint::NK::BoolLit &&
+            n.kind != blueprint::NK::VarGet &&
+            n.kind != blueprint::NK::Unary &&
+            n.kind != blueprint::NK::Binary &&
+            n.kind != blueprint::NK::CallExpr) {
+            ImNodes::BeginOutputAttribute(pin(ni, kExecOut));
+            ImGui::TextUnformatted("next");
+            ImNodes::EndOutputAttribute();
+            if (n.kind == blueprint::NK::If) {
+                ImNodes::BeginOutputAttribute(pin(ni, kBranchA));
+                ImGui::TextUnformatted("then");
+                ImNodes::EndOutputAttribute();
+                ImNodes::BeginOutputAttribute(pin(ni, kBranchB));
+                ImGui::TextUnformatted("else");
+                ImNodes::EndOutputAttribute();
+            } else if (n.kind == blueprint::NK::While ||
+                       n.kind == blueprint::NK::Repeat) {
+                ImNodes::BeginOutputAttribute(pin(ni, kBranchA));
+                ImGui::TextUnformatted("body");
+                ImNodes::EndOutputAttribute();
+            }
+        }
+        ImNodes::EndNode();
+    }
+
+    int link_id = 0;
+    for (size_t i = 0; i < ns.size(); ++i) {
+        const blueprint::Node& n = ns[i];
+        int ni = static_cast<int>(i);
+        if (n.exec_next != -1)
+            ImNodes::Link(link_id++, pin(ni, kExecOut),
+                          pin(n.exec_next, kExecIn));
+        if (n.body != -1)
+            ImNodes::Link(link_id++, pin(ni, kBranchA),
+                          pin(n.body, kExecIn));
+        if (n.els != -1)
+            ImNodes::Link(link_id++, pin(ni, kBranchB),
+                          pin(n.els, kExecIn));
+        for (size_t k = 0; k < n.in.size(); ++k)
+            ImNodes::Link(link_id++, pin(n.in[k], kValOut),
+                          pin(ni, kValIn0 + (int)k));
+    }
+
+    ImNodes::EndNodeEditor();
+    graph_laid_ = true;
     ImGui::End();
 }
 

@@ -2,6 +2,7 @@
 #include <memory>
 #include <string>
 
+#include "blueprint/graph.hpp"
 #include "sim/robot_host.hpp"
 #include "sim/world.hpp"
 #include "vm/bytecode.hpp"
@@ -28,6 +29,7 @@ private:
     void draw_controls();
     void draw_editor();
     void draw_farm();
+    void draw_blueprint();
 
     std::string source_;
     std::string status_;
@@ -39,6 +41,9 @@ private:
     std::unique_ptr<sim::RobotHost> host_;
     std::unique_ptr<vm::Chunk> chunk_;
     std::unique_ptr<vm::VM> vm_;
+
+    blueprint::Graph graph_;   // blueprint view of the current program
+    bool graph_laid_ = false;  // apply codec layout once per (re)build
 };
 
 }  // namespace farm::game
