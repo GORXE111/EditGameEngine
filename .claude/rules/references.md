@@ -42,4 +42,11 @@
 ## 5. 借鉴记录
 
 > 格式：`[日期] 借鉴点 → 本项目落点 → 差异`
-（开发过程中追加）
+
+- [2026-05-18] **UE5 `FFrame`（Stack.h）的显式执行帧模型** → 落点 `src/vm/vm.{hpp,cpp}` 的 `CallFrame`/`VM`。
+  借鉴：`FFrame` 用 `uint8* Code`(PC) + `Locals` + `FlowStack`(跳转) + `FFrame* PreviousFrame`(显式调用链，非 C++ 递归)，由外部 `Step()` 驱动一条指令 → 因此天然可暂停/恢复/单步/序列化。
+  本项目落点：VM 用显式 `CallFrame` 栈 + 共享操作数栈 + 指令索引 PC，`run(budget)` 外部驱动；不使用 C++ 调用栈做语言级函数调用。
+  差异：我们用栈式字节码（非 UE 的属性/Code 字节流），变量按名解析（globals/locals map）保证与树解释器语义逐一对齐；`FlowStack` 用编译期跳转目标替代。
+- [2026-05-18] **UE5 Latent（LatentActionManager.h）跨帧恢复** → 落点：M2 的逐 tick 原生挂起设计依据。
+  借鉴：latent 节点登记回调 + linkage，动作完成后在后续 tick 于正确字节码偏移恢复。
+  本项目落点（M2）：机器人原生动作消耗 tick → VM 返回挂起态，游戏 tick 完成后 `run()` 续跑。M1.4 先用 `run(step budget)` 协作式暂停证明可恢复性，不依赖 sim。
