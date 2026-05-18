@@ -43,7 +43,7 @@ void App::rebuild() {
     vm_.reset();
     try {
         lang::Program prog = lang::parse(source_);
-        graph_ = blueprint::build(prog);  // blueprint view of this program
+        graph_ = blueprint::build(prog, layout_);  // keep node positions
         graph_laid_ = false;
         chunk_ = std::make_unique<vm::Chunk>(vm::compile(prog));
         world_ = std::make_unique<sim::World>(kW, kH);
@@ -51,6 +51,19 @@ void App::rebuild() {
         vm_ = std::make_unique<vm::VM>(*chunk_, *host_);
     } catch (const std::exception& e) {
         error_ = e.what();
+    }
+}
+
+// Text edit -> re-derive the blueprint, preserving node positions by AST id.
+// Does not touch the running VM/world (only Apply/Reset does).
+void App::resync_graph() {
+    try {
+        lang::Program prog = lang::parse(source_);
+        graph_ = blueprint::build(prog, layout_);
+        graph_laid_ = false;
+        error_.clear();
+    } catch (const std::exception& e) {
+        error_ = e.what();  // keep last good graph_
     }
 }
 
@@ -75,6 +88,7 @@ void App::step_one_action() {
 }
 
 void App::frame() {
+    if (src_dirty_) { resync_graph(); src_dirty_ = false; }
     if (running_) advance(speed_);
     draw_controls();
     draw_editor();
@@ -123,7 +137,8 @@ void App::draw_editor() {
     ImGui::SameLine();
     ImGui::TextDisabled("(edit, then Apply)");
     ImVec2 sz = ImGui::GetContentRegionAvail();
-    ImGui::InputTextMultiline("##src", &source_, sz);
+    if (ImGui::InputTextMultiline("##src", &source_, sz))
+        src_dirty_ = true;  // live text -> blueprint sync next frame
     ImGui::End();
 }
 
@@ -208,6 +223,36 @@ std::string node_label(const farm::blueprint::Node& n) {
     return "?";
 }
 
+const farm::lang::Tok kBinOps[] = {
+    farm::lang::Tok::Plus, farm::lang::Tok::Minus, farm::lang::Tok::Star,
+    farm::lang::Tok::Slash, farm::lang::Tok::Percent, farm::lang::Tok::Eq,
+    farm::lang::Tok::Ne, farm::lang::Tok::Lt, farm::lang::Tok::Le,
+    farm::lang::Tok::Gt, farm::lang::Tok::Ge, farm::lang::Tok::KwAnd,
+    farm::lang::Tok::KwOr};
+const farm::lang::Tok kUnOps[] = {farm::lang::Tok::KwNot,
+                                  farm::lang::Tok::Minus};
+
+bool op_combo(const char* id, farm::lang::Tok& op, const farm::lang::Tok* set,
+              int n) {
+    int cur = 0;
+    for (int i = 0; i < n; ++i)
+        if (set[i] == op) cur = i;
+    ImGui::SetNextItemWidth(70);
+    if (ImGui::BeginCombo(id, op_text(op))) {
+        bool changed = false;
+        for (int i = 0; i < n; ++i) {
+            bool sel = (i == cur);
+            if (ImGui::Selectable(op_text(set[i]), sel)) {
+                op = set[i];
+                changed = true;
+            }
+        }
+        ImGui::EndCombo();
+        return changed;
+    }
+    return false;
+}
+
 // Attribute-id slots (unique per node: index*64 + slot).
 inline int pin(int node_index, int slot) { return node_index * 64 + slot; }
 constexpr int kExecIn = 1, kExecOut = 2, kBranchA = 3, kBranchB = 4,
@@ -227,7 +272,7 @@ void App::draw_blueprint() {
     ImGui::SetNextWindowSize({660, 230}, ImGuiCond_FirstUseEver);
     ImGui::Begin("Blueprint");
 
-    if (ImGui::Button("Regenerate code from blueprint")) {
+    if (ImGui::Button("Apply blueprint -> run")) {
         try {
             source_ = lang::print(blueprint::to_ast(graph_));
             rebuild();
@@ -236,21 +281,46 @@ void App::draw_blueprint() {
         }
     }
     ImGui::SameLine();
-    ImGui::TextDisabled("(read-only view; editing arrives in M5)");
+    ImGui::TextDisabled("(drag nodes; edit values -> code updates live)");
 
+    bool edited = false;
     ImNodes::BeginNodeEditor();
-    const auto& ns = graph_.nodes;
+    auto& ns = graph_.nodes;
 
     for (size_t i = 0; i < ns.size(); ++i) {
-        const blueprint::Node& n = ns[i];
+        blueprint::Node& n = ns[i];
         int ni = static_cast<int>(i);
         if (!graph_laid_)
             ImNodes::SetNodeGridSpacePos(ni, ImVec2(n.x, n.y));
 
         ImNodes::BeginNode(ni);
+        ImGui::PushID(ni);
         ImNodes::BeginNodeTitleBar();
         ImGui::TextUnformatted(node_label(n).c_str());
         ImNodes::EndNodeTitleBar();
+
+        // editable payload (the live blueprint -> code direction)
+        using NK = blueprint::NK;
+        if (n.kind == NK::IntLit) {
+            int v = static_cast<int>(n.ival);
+            ImGui::SetNextItemWidth(90);
+            if (ImGui::InputInt("##i", &v)) { n.ival = v; edited = true; }
+        } else if (n.kind == NK::BoolLit) {
+            if (ImGui::Checkbox("##b", &n.bval)) edited = true;
+        } else if (n.kind == NK::VarGet || n.kind == NK::Assign ||
+                   n.kind == NK::CallStmt || n.kind == NK::CallExpr ||
+                   n.kind == NK::FuncDef) {
+            ImGui::SetNextItemWidth(120);
+            if (ImGui::InputText("##nm", &n.name)) edited = true;
+        } else if (n.kind == NK::Binary) {
+            if (op_combo("##op", n.op, kBinOps,
+                         (int)(sizeof(kBinOps) / sizeof(kBinOps[0]))))
+                edited = true;
+        } else if (n.kind == NK::Unary) {
+            if (op_combo("##op", n.op, kUnOps,
+                         (int)(sizeof(kUnOps) / sizeof(kUnOps[0]))))
+                edited = true;
+        }
 
         if (has_exec_in(n.kind)) {
             ImNodes::BeginInputAttribute(pin(ni, kExecIn));
@@ -296,6 +366,7 @@ void App::draw_blueprint() {
                 ImNodes::EndOutputAttribute();
             }
         }
+        ImGui::PopID();
         ImNodes::EndNode();
     }
 
@@ -318,7 +389,26 @@ void App::draw_blueprint() {
     }
 
     ImNodes::EndNodeEditor();
+
+    // Capture user-dragged positions back into the graph + layout store so
+    // they survive the next re-derive (layout keyed by AST id).
+    for (size_t i = 0; i < ns.size(); ++i) {
+        ImVec2 p = ImNodes::GetNodeGridSpacePos(static_cast<int>(i));
+        ns[i].x = p.x;
+        ns[i].y = p.y;
+    }
+    layout_ = blueprint::capture_layout(graph_);
     graph_laid_ = true;
+
+    // Blueprint payload edit -> regenerate the code view (AST stays the
+    // single source of truth; we do NOT reparse, so node ids are stable).
+    if (edited) {
+        try {
+            source_ = lang::print(blueprint::to_ast(graph_));
+        } catch (const std::exception& e) {
+            error_ = e.what();
+        }
+    }
     ImGui::End();
 }
 

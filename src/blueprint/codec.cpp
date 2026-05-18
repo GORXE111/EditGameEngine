@@ -251,6 +251,27 @@ Graph build(const Program& program) {
     return std::move(b.g);
 }
 
+Graph build(const Program& program, const LayoutStore& prev) {
+    Graph g = build(program);
+    for (auto& n : g.nodes) {
+        if (n.ast_id == farm::lang::kNoNode) continue;
+        auto it = prev.find(n.ast_id);
+        if (it != prev.end()) {
+            n.x = it->second.first;
+            n.y = it->second.second;
+        }
+    }
+    return g;
+}
+
+LayoutStore capture_layout(const Graph& g) {
+    LayoutStore ls;
+    for (const auto& n : g.nodes)
+        if (n.ast_id != farm::lang::kNoNode)
+            ls[n.ast_id] = {n.x, n.y};
+    return ls;
+}
+
 Program to_ast(const Graph& g) {
     Program p;
     if (g.entry < 0) return p;
