@@ -1,9 +1,6 @@
-// FarmCode game shell — M0 bootstrap.
-// SDL2 + OpenGL window hosting Dear ImGui + imnodes. The actual farm
-// rendering, editors and run controls land in M3+. For now this proves
-// the engine base + editor-UI stack link and run.
+// FarmCode game shell. SDL2 + OpenGL window hosting Dear ImGui; the App
+// (game/app.hpp) renders the farm + editor + run controls.
 
-// SDL2main (linked in CMake) redefines main -> SDL_main and supplies WinMain.
 #include <SDL.h>
 #include <SDL_opengl.h>
 
@@ -12,10 +9,7 @@
 #include "backends/imgui_impl_opengl3.h"
 #include "imnodes.h"
 
-#include "lang/lang.hpp"
-#include "vm/vm.hpp"
-#include "sim/sim.hpp"
-#include "blueprint/blueprint.hpp"
+#include "game/app.hpp"
 
 #include <cstdio>
 
@@ -24,35 +18,32 @@ int main(int, char**) {
         std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
         return 1;
     }
-
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 
     const auto wflags = static_cast<SDL_WindowFlags>(
         SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
     SDL_Window* window = SDL_CreateWindow(
-        "FarmCode", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        1280, 800, wflags);
+        "FarmCode", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 800,
+        wflags);
     if (!window) {
         std::fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
         SDL_Quit();
         return 1;
     }
-
     SDL_GLContext gl = SDL_GL_CreateContext(window);
     SDL_GL_MakeCurrent(window, gl);
-    SDL_GL_SetSwapInterval(1);  // vsync
+    SDL_GL_SetSwapInterval(1);
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-    ImNodes::CreateContext();
-    // NOTE: docking (multi-panel editor layout) lands in M3 by switching the
-    // imgui dependency to the docking branch. Plain release tag for M0.
+    ImNodes::CreateContext();  // used by M4 blueprint editor
     ImGui::StyleColorsDark();
     ImGui_ImplSDL2_InitForOpenGL(window, gl);
     ImGui_ImplOpenGL3_Init("#version 130");
+
+    farm::game::App app;
 
     bool running = true;
     while (running) {
@@ -70,29 +61,7 @@ int main(int, char**) {
         ImGui_ImplSDL2_NewFrame();
         ImGui::NewFrame();
 
-        // Status panel — confirms all static libs link.
-        ImGui::Begin("FarmCode");
-        ImGui::Text("M0 bootstrap OK");
-        ImGui::Text("modules: %s  %s  %s  %s",
-                    farm::lang::version().c_str(),
-                    farm::vm::version().c_str(),
-                    farm::sim::version().c_str(),
-                    farm::blueprint::version().c_str());
-        ImGui::End();
-
-        // Empty blueprint canvas — confirms imnodes works.
-        ImGui::Begin("Blueprint");
-        ImNodes::BeginNodeEditor();
-        ImNodes::BeginNode(1);
-        ImNodes::BeginNodeTitleBar();
-        ImGui::TextUnformatted("start");
-        ImNodes::EndNodeTitleBar();
-        ImNodes::BeginOutputAttribute(2);
-        ImGui::Text("exec");
-        ImNodes::EndOutputAttribute();
-        ImNodes::EndNode();
-        ImNodes::EndNodeEditor();
-        ImGui::End();
+        app.frame();
 
         ImGui::Render();
         int w, h;

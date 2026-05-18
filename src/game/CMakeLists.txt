@@ -1,4 +1,4 @@
-add_executable(game WIN32 main.cpp)
+add_executable(game WIN32 main.cpp app.cpp)
 target_include_directories(game PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # SDL2main provides the WinMain shim that forwards to our main() (WIN32
 # subsystem app -> no console window). Must precede SDL2.

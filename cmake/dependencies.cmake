@@ -55,11 +55,13 @@ add_library(imgui STATIC
   ${imgui_SOURCE_DIR}/imgui_demo.cpp
   ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl2.cpp
   ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
+  ${imgui_SOURCE_DIR}/misc/cpp/imgui_stdlib.cpp
   ${imnodes_SOURCE_DIR}/imnodes.cpp
 )
 target_include_directories(imgui PUBLIC
   ${imgui_SOURCE_DIR}
   ${imgui_SOURCE_DIR}/backends
+  ${imgui_SOURCE_DIR}/misc/cpp
   ${imnodes_SOURCE_DIR}
 )
 # imnodes (and several imgui helpers) require the math operators; must be
