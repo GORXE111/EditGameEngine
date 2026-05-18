@@ -9,7 +9,7 @@
 namespace farm::sim {
 
 enum Dir : int { North = 0, East = 1, South = 2, West = 3 };
-enum CropId : int { CropNone = 0, CropWheat = 1 };
+enum CropId : int { CropNone = 0, CropWheat = 1, CropCarrot = 2 };
 
 // sense() result codes.
 enum Sensed : int { SenseWild = 0, SenseTilled = 1, SenseGrowing = 2,
@@ -37,6 +37,8 @@ public:
     const Tile& tile(int x, int y) const { return grid_[idx(x, y)]; }
     const Tile& here() const { return grid_[idx(rx_, ry_)]; }
     int64_t inventory_of(int crop) const;
+    // Deduct n of a crop from inventory; false (and no change) if short.
+    bool spend(int crop, int64_t n);
 
     bool in_bounds(int x, int y) const {
         return x >= 0 && y >= 0 && x < w_ && y < h_;

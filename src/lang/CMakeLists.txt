@@ -4,5 +4,6 @@ add_library(lang STATIC
   parser.cpp
   printer.cpp
   interpreter.cpp
+  feature.cpp
 )
 target_include_directories(lang PUBLIC ${CMAKE_SOURCE_DIR}/src)

@@ -3,6 +3,7 @@
 #include <string>
 
 #include "lang/ast.hpp"
+#include "lang/feature.hpp"
 
 namespace farm::lang {
 
@@ -15,5 +16,10 @@ struct ParseError : std::runtime_error {
 // Lex + parse source into a Program. Throws LexError or ParseError.
 // Node ids are assigned in source order starting at 1.
 Program parse(const std::string& src);
+
+// Parse, then reject any control-flow construct not present in `fs`
+// (progression gating). Throws ParseError pointing at the locked node.
+Program parse(const std::string& src, const FeatureSet& fs);
+void require_features(const Program& p, const FeatureSet& fs);
 
 }  // namespace farm::lang

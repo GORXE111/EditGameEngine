@@ -4,7 +4,8 @@ namespace farm::sim {
 
 int crop_maturity(int crop) {
     switch (crop) {
-        case CropWheat: return 5;  // 5 ticks to ripen
+        case CropWheat: return 5;   // 5 ticks to ripen
+        case CropCarrot: return 8;  // slower, higher-tier crop
         default: return 0;
     }
 }
@@ -15,6 +16,12 @@ World::World(int width, int height)
 int64_t World::inventory_of(int crop) const {
     auto it = inv_.find(crop);
     return it == inv_.end() ? 0 : it->second;
+}
+
+bool World::spend(int crop, int64_t n) {
+    if (n < 0 || inventory_of(crop) < n) return false;
+    inv_[crop] -= n;
+    return true;
 }
 
 bool World::move(int dir) {
@@ -40,7 +47,7 @@ bool World::till() {
 }
 
 bool World::plant(int crop) {
-    if (crop != CropWheat) return false;
+    if (crop != CropWheat && crop != CropCarrot) return false;
     Tile& t = at(rx_, ry_);
     if (!t.tilled || t.crop != CropNone) return false;
     t.crop = crop;

@@ -13,23 +13,24 @@
 namespace farm::game {
 
 namespace {
+// Start of progression: loops / conditionals / functions are LOCKED.
+// Base language only (assignment, native calls, return). Farm wheat,
+// then open the Tech panel and unlock features to scale up.
 const char* kExample =
-    "# FarmCode 示例：机器人蛇形扫过农田，逐格种小麦\n"
-    "y = 0\n"
-    "while y < 6 do\n"
-    "  x = 0\n"
-    "  while x < 8 do\n"
-    "    till()\n"
-    "    plant(1)\n"
-    "    repeat 5 do wait() end\n"
-    "    harvest()\n"
-    "    if x < 7 then move(1) end\n"
-    "    x = x + 1\n"
-    "  end\n"
-    "  repeat 7 do move(3) end\n"   // back to west edge
-    "  if y < 5 then move(2) end\n" // next row
-    "  y = y + 1\n"
-    "end\n";
+    "# 起步：循环/条件/函数还没解锁。\n"
+    "# 用直线代码种几格小麦攒资源，再去 Tech 面板解锁。\n"
+    "till() plant(1)\n"
+    "wait() wait() wait() wait() wait()\n"
+    "harvest()\n"
+    "move(1)\n"
+    "till() plant(1)\n"
+    "wait() wait() wait() wait() wait()\n"
+    "harvest()\n"
+    "move(1)\n"
+    "till() plant(1)\n"
+    "wait() wait() wait() wait() wait()\n"
+    "harvest()\n"
+    "return num_items(1)\n";
 }  // namespace
 
 App::App() {
@@ -42,12 +43,13 @@ void App::rebuild() {
     running_ = false;
     vm_.reset();
     try {
-        lang::Program prog = lang::parse(source_);
+        lang::Program prog = lang::parse(source_, prog_.feature_set());
         graph_ = blueprint::build(prog, layout_);  // keep node positions
         graph_laid_ = false;
         chunk_ = std::make_unique<vm::Chunk>(vm::compile(prog));
-        world_ = std::make_unique<sim::World>(kW, kH);
-        host_ = std::make_unique<sim::RobotHost>(*world_);
+        int n = prog_.max_farm_size();
+        world_ = std::make_unique<sim::World>(n, n);
+        host_ = std::make_unique<sim::RobotHost>(*world_, 1'000'000, &prog_);
         vm_ = std::make_unique<vm::VM>(*chunk_, *host_);
     } catch (const std::exception& e) {
         error_ = e.what();
@@ -58,7 +60,7 @@ void App::rebuild() {
 // Does not touch the running VM/world (only Apply/Reset does).
 void App::resync_graph() {
     try {
-        lang::Program prog = lang::parse(source_);
+        lang::Program prog = lang::parse(source_, prog_.feature_set());
         graph_ = blueprint::build(prog, layout_);
         graph_laid_ = false;
         error_.clear();
@@ -94,6 +96,7 @@ void App::frame() {
     draw_editor();
     draw_farm();
     draw_blueprint();
+    draw_tech();
 }
 
 void App::draw_controls() {
@@ -148,17 +151,18 @@ void App::draw_farm() {
     ImGui::Begin("Farm");
     if (!world_) { ImGui::TextUnformatted("no world"); ImGui::End(); return; }
 
+    const int gw = world_->width(), gh = world_->height();
     ImDrawList* dl = ImGui::GetWindowDrawList();
     ImVec2 org = ImGui::GetCursorScreenPos();
     ImVec2 avail = ImGui::GetContentRegionAvail();
-    float cell = avail.x / kW;
-    float maxcy = avail.y / kH;
+    float cell = avail.x / gw;
+    float maxcy = avail.y / gh;
     if (maxcy < cell) cell = maxcy;
     if (cell < 8.0f) cell = 8.0f;
     const float pad = 1.0f;
 
-    for (int y = 0; y < kH; ++y) {
-        for (int x = 0; x < kW; ++x) {
+    for (int y = 0; y < gh; ++y) {
+        for (int x = 0; x < gw; ++x) {
             const sim::Tile& t = world_->tile(x, y);
             ImU32 col;
             if (t.crop != sim::CropNone) {
@@ -182,7 +186,7 @@ void App::draw_farm() {
     dl->AddCircleFilled(c, cell * 0.30f, IM_COL32(60, 140, 240, 255));
     dl->AddCircle(c, cell * 0.30f, IM_COL32(255, 255, 255, 255), 0, 2.0f);
 
-    ImGui::Dummy({kW * cell, kH * cell});
+    ImGui::Dummy({gw * cell, gh * cell});
     ImGui::End();
 }
 
@@ -409,6 +413,44 @@ void App::draw_blueprint() {
             error_ = e.what();
         }
     }
+    ImGui::End();
+}
+
+void App::draw_tech() {
+    ImGui::SetNextWindowPos({1050, 10}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({220, 430}, ImGuiCond_FirstUseEver);
+    ImGui::Begin("Tech");
+
+    long long wheat =
+        world_ ? static_cast<long long>(
+                     world_->inventory_of(sim::CropWheat))
+               : 0;
+    ImGui::Text("Wheat: %lld", wheat);
+    ImGui::TextDisabled("收获小麦换解锁");
+    ImGui::Separator();
+
+    for (int id = 0; id < sim::U_COUNT; ++id) {
+        const sim::UnlockDef& d = sim::Progression::def(id);
+        ImGui::PushID(id);
+        if (prog_.is_unlocked(id)) {
+            ImGui::TextDisabled("%s  [unlocked]", d.name);
+        } else {
+            ImGui::Text("%s  (%d)", d.name, d.cost_wheat);
+            ImGui::SameLine();
+            bool afford = world_ && wheat >= d.cost_wheat;
+            if (!afford) ImGui::BeginDisabled();
+            if (ImGui::SmallButton("Unlock") && world_ &&
+                world_->spend(sim::CropWheat, d.cost_wheat)) {
+                prog_.grant(id);
+                src_dirty_ = true;  // re-validate editor w/ new features
+            }
+            if (!afford) ImGui::EndDisabled();
+        }
+        ImGui::PopID();
+    }
+
+    ImGui::Separator();
+    ImGui::TextWrapped("也可在代码里调用 unlock(id) 自助解锁。");
     ImGui::End();
 }
 

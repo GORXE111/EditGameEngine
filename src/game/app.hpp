@@ -3,6 +3,7 @@
 #include <string>
 
 #include "blueprint/codec.hpp"
+#include "sim/progress.hpp"
 #include "sim/robot_host.hpp"
 #include "sim/world.hpp"
 #include "vm/bytecode.hpp"
@@ -20,9 +21,6 @@ public:
     void frame();  // call once per rendered frame (UI + simulation step)
 
 private:
-    static constexpr int kW = 8;
-    static constexpr int kH = 6;
-
     void rebuild();                 // (re)parse+compile source, reset world
     void resync_graph();            // text -> blueprint (no VM reset)
     void advance(int64_t budget);   // run VM, trap errors
@@ -31,6 +29,7 @@ private:
     void draw_editor();
     void draw_farm();
     void draw_blueprint();
+    void draw_tech();               // unlock tree (progression)
 
     std::string source_;
     std::string status_;
@@ -38,6 +37,7 @@ private:
     bool running_ = false;
     int speed_ = 300;  // VM instructions per frame when running
 
+    sim::Progression prog_;  // persists across Reset (permanent progression)
     std::unique_ptr<sim::World> world_;
     std::unique_ptr<sim::RobotHost> host_;
     std::unique_ptr<vm::Chunk> chunk_;

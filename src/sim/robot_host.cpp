@@ -31,7 +31,10 @@ Value RobotHost::call(const std::string& name,
         return Value::B(ok);
     }
     if (name == "plant") {
-        bool ok = world_.plant(arg_int(args, 0, "plant"));
+        int crop = arg_int(args, 0, "plant");
+        bool locked = (crop == CropCarrot && prog_ &&
+                       !prog_->crop_carrot_unlocked());
+        bool ok = !locked && world_.plant(crop);
         consume_tick();
         return Value::B(ok);
     }
@@ -56,6 +59,27 @@ Value RobotHost::call(const std::string& name,
     if (name == "can_harvest") return Value::B(world_.can_harvest());
     if (name == "inventory")
         return Value::I(world_.inventory_of(arg_int(args, 0, "inventory")));
+    if (name == "num_items")
+        return Value::I(world_.inventory_of(arg_int(args, 0, "num_items")));
+
+    // progression / economy natives (only when a Progression is attached)
+    if (prog_) {
+        if (name == "unlock") {
+            int id = arg_int(args, 0, "unlock");
+            int cost = prog_->cost_of(id);
+            bool ok = !prog_->is_unlocked(id) &&
+                      world_.spend(CropWheat, cost);
+            if (ok) prog_->grant(id);
+            consume_tick();
+            return Value::B(ok);
+        }
+        if (name == "get_cost")
+            return Value::I(prog_->cost_of(arg_int(args, 0, "get_cost")));
+        if (name == "num_unlocked")
+            return Value::I(
+                prog_->is_unlocked(arg_int(args, 0, "num_unlocked")) ? 1
+                                                                     : 0);
+    }
 
     throw RuntimeError("unknown robot action '" + name + "'");
 }
