@@ -5,6 +5,7 @@ add_executable(farmcode_tests
   test_parser.cpp
   test_interp.cpp
   test_vm.cpp
+  test_sim.cpp
 )
 target_include_directories(farmcode_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(farmcode_tests PRIVATE
