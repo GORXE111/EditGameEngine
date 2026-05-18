@@ -1,0 +1,35 @@
+# Build
+/build/
+/out/
+**/CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+*.ninja
+.ninja_deps
+.ninja_log
+
+# FetchContent / deps cache
+/_deps/
+**/_deps/
+
+# MSVC / VS
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.exe
+.vs/
+*.user
+
+# IDE
+.idea/
+.cache/
+compile_commands.json
+
+# Claude Code local (per-machine) settings
+.claude/settings.local.json
+
+# OS
+Thumbs.db
+.DS_Store

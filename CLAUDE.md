@@ -1,0 +1,57 @@
+# 编程农场游戏 — 项目入口
+
+> 新会话先读本文件，再读 `.claude/rules/requirements.md` 与 `.claude/rules/references.md`。
+
+## 项目目标
+
+编程驱动的农场游戏：玩家用**蓝图或文本代码**编写程序，指挥机器人在农田网格自动种田。编程=核心玩法（对标 *The Farmer Was Replaced*）。自研一门嵌入式脚本语言 + 字节码虚拟机（类 Lua），蓝图与代码双向同构（同一份 AST）。
+
+## 技术栈
+
+C++20 / 自研引擎 / SDL2 + OpenGL / Dear ImGui + imnodes / CMake + Ninja + MSVC。详见 `.claude/rules/requirements.md` 第 2 节。
+
+## 关键约束
+
+- **UE5 仓库 `C:\Users\admin\Documents\UE5NEWAI` 只读**，仅查阅参考，绝不修改。见 `.claude/rules/references.md`。
+- `lang`/`vm`/`sim` 无引擎依赖，必须可无头单测。
+- VM 可恢复执行（显式帧栈，对标 UE5 FFrame）。
+
+## 目录结构
+
+```
+.claude/rules/       requirements.md, references.md
+CMakeLists.txt       顶层；CMakePresets.json（Ninja+MSVC @ D:\VS2022）
+third_party/         imgui, imnodes（内嵌）；SDL2/doctest 走 FetchContent
+src/lang/            Lexer/Parser/AST/编译器→字节码（无引擎依赖）
+src/vm/              字节码 VM、可恢复执行、原生函数绑定（无引擎依赖）
+src/blueprint/       节点模型 + AST↔图 编解码 + 布局持久化
+src/sim/             农场世界/网格/作物/经济/tick + 原生 API（无引擎依赖）
+src/game/            SDL2+OpenGL+ImGui+imnodes 渲染/HUD/编辑器/运行控制
+tests/               doctest 无头黄金测试
+```
+
+## 构建命令
+
+```
+cmake --preset default
+cmake --build --preset default
+ctest --preset default        # 无头测试
+```
+
+MSVC 工具链：VS2022 Community @ `D:\VS2022`（非默认路径）。
+远端：`origin` = https://github.com/GORXE111/EditGameEngine （仅用户明确要求时推送）。
+已知后续：imgui 当前为 release tag v1.91.5；M3 多面板布局时切换到 docking 分支并固定提交。
+
+## 里程碑状态
+
+- [x] M0 地基（规则/CMake/起窗）  ← 构建+无头测试通过；窗口待人工目视
+- [ ] M1 语言与 VM 核心  ← 下一步
+- [ ] M2 农场仿真 + 原生 API
+- [ ] M3 渲染 + 首个可玩
+- [ ] M4 蓝图编辑器
+- [ ] M5 双向同构同步
+- [ ] M6 进程与内容
+
+## 开发规范
+
+Commit：`type(scope): description`，scope ∈ lang|vm|blueprint|sim|game|infra。仅用户明确要求时提交。详见 `.claude/rules/requirements.md` 第 6 节。
