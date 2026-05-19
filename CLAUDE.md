@@ -55,8 +55,11 @@ MSVC 工具链：VS2022 Community @ `D:\VS2022`（非默认路径）。
 **M0–M6 全部完成。** 计划外增强：
 
 - [x] E1 TFWR 机制深化  ← 浇水x2生长/化肥瞬熟/南瓜(高产)/伴生加成，46用例213断言全过
+- [x] E2 共享程序多无人机  ← World多drone+RobotHost手动tick+Fleet调度+get_drone_id()，51用例229断言全过
 
-测试累计 46 用例 / 213 断言全绿。
+测试累计 51 用例 / 229 断言全绿。
+
+> E2：World 多无人机(drone0 向后兼容单机)；RobotHost 加 drone 索引+手动tick模式；run_fleet 轮流调度(每轮各无人机一动作后世界推进一tick)；get_drone_id()/num_drones() 原生；U_Drones 解锁(2机)；App 统一为 N 架机队(N=1 等价原单机)。
 
 > M5 范围：双向同构覆盖「文本↔蓝图重建(布局按 ast_id 保留)」与「蓝图节点改值/改名/改运算符→实时回写」。蓝图结构性编辑(增删节点/重连)留待后续。
 > M6 范围：科技树解锁作物(Carrot)/农田扩张/原生API/语言特性(if/while/repeat/func 渐进解锁)+经济(收获换解锁)+unlock()/get_cost()/num_items()/num_unlocked() 原生。语言数组等属 v2，门控待 v2。

@@ -14,14 +14,20 @@ namespace farm::sim {
 class RobotHost : public farm::lang::Host {
 public:
     explicit RobotHost(World& w, uint64_t max_ticks = 1'000'000,
-                       Progression* prog = nullptr)
-        : world_(w), max_ticks_(max_ticks), prog_(prog) {}
+                       Progression* prog = nullptr, int drone = 0,
+                       bool auto_tick = true)
+        : world_(w), max_ticks_(max_ticks), prog_(prog), drone_(drone),
+          auto_tick_(auto_tick) {}
 
     farm::lang::Value call(
         const std::string& name,
         const std::vector<farm::lang::Value>& args) override;
 
     World& world() { return world_; }
+    int drone() const { return drone_; }
+    // # of tick-consuming actions this drone has performed (multi-drone
+    // runner uses this to give each drone one action per round).
+    uint64_t actions() const { return actions_; }
 
 private:
     int arg_int(const std::vector<farm::lang::Value>& a, size_t i,
@@ -31,6 +37,9 @@ private:
     World& world_;
     uint64_t max_ticks_;
     Progression* prog_;  // optional: enables crop gating + unlock natives
+    int drone_;
+    bool auto_tick_;     // true: advance world per action (single-drone)
+    uint64_t actions_ = 0;
 };
 
 }  // namespace farm::sim

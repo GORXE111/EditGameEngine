@@ -29,7 +29,14 @@ int crop_companion(int crop) {
 }
 
 World::World(int width, int height)
-    : w_(width), h_(height), grid_(static_cast<size_t>(width) * height) {}
+    : w_(width), h_(height),
+      drones_(1, {0, 0}),
+      grid_(static_cast<size_t>(width) * height) {}
+
+int World::add_drone() {
+    drones_.push_back({0, 0});
+    return static_cast<int>(drones_.size()) - 1;
+}
 
 int64_t World::inventory_of(int crop) const {
     auto it = inv_.find(crop);
@@ -42,8 +49,8 @@ bool World::spend(int crop, int64_t n) {
     return true;
 }
 
-bool World::move(int dir) {
-    int nx = rx_, ny = ry_;
+bool World::move(int drone, int dir) {
+    int nx = drones_[drone].first, ny = drones_[drone].second;
     switch (dir) {
         case North: --ny; break;
         case East:  ++nx; break;
@@ -52,22 +59,21 @@ bool World::move(int dir) {
         default: return false;
     }
     if (!in_bounds(nx, ny)) return false;  // blocked by edge, no move
-    rx_ = nx;
-    ry_ = ny;
+    drones_[drone] = {nx, ny};
     return true;
 }
 
-bool World::till() {
-    Tile& t = at(rx_, ry_);
+bool World::till(int drone) {
+    Tile& t = at(drones_[drone].first, drones_[drone].second);
     if (t.tilled) return false;
     t.tilled = true;
     return true;
 }
 
-bool World::plant(int crop) {
+bool World::plant(int drone, int crop) {
     if (crop != CropWheat && crop != CropCarrot && crop != CropPumpkin)
         return false;
-    Tile& t = at(rx_, ry_);
+    Tile& t = at(drones_[drone].first, drones_[drone].second);
     if (!t.tilled || t.crop != CropNone) return false;
     t.crop = crop;
     t.age = 0;
@@ -75,15 +81,15 @@ bool World::plant(int crop) {
     return true;
 }
 
-bool World::water() {
-    Tile& t = at(rx_, ry_);
+bool World::water(int drone) {
+    Tile& t = at(drones_[drone].first, drones_[drone].second);
     if (t.crop == CropNone) return false;
     t.watered = true;
     return true;
 }
 
-bool World::fertilize() {
-    Tile& t = at(rx_, ry_);
+bool World::fertilize(int drone) {
+    Tile& t = at(drones_[drone].first, drones_[drone].second);
     if (t.crop == CropNone) return false;
     t.age = crop_maturity(t.crop);  // instantly ripe
     return true;
@@ -101,13 +107,13 @@ bool World::companion_adjacent(int x, int y, int crop) const {
     return false;
 }
 
-bool World::harvest() {
-    Tile& t = at(rx_, ry_);
+bool World::harvest(int drone) {
+    int x = drones_[drone].first, y = drones_[drone].second;
+    Tile& t = at(x, y);
     if (t.crop == CropNone || t.age < crop_maturity(t.crop)) return false;
     int crop = t.crop;
     int64_t gain = crop_base_yield(crop);
-    if (polyculture_ &&
-        companion_adjacent(rx_, ry_, crop_companion(crop)))
+    if (polyculture_ && companion_adjacent(x, y, crop_companion(crop)))
         gain += 1;  // polyculture / companion-planting bonus
     inv_[crop] += gain;
     t.crop = CropNone;
@@ -117,15 +123,15 @@ bool World::harvest() {
     return true;
 }
 
-int World::sense() const {
-    const Tile& t = grid_[idx(rx_, ry_)];
+int World::sense(int drone) const {
+    const Tile& t = grid_[idx(drones_[drone].first, drones_[drone].second)];
     if (t.crop != CropNone)
         return t.age >= crop_maturity(t.crop) ? SenseMature : SenseGrowing;
     return t.tilled ? SenseTilled : SenseWild;
 }
 
-bool World::can_harvest() const {
-    const Tile& t = grid_[idx(rx_, ry_)];
+bool World::can_harvest(int drone) const {
+    const Tile& t = grid_[idx(drones_[drone].first, drones_[drone].second)];
     return t.crop != CropNone && t.age >= crop_maturity(t.crop);
 }
 

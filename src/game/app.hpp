@@ -1,6 +1,7 @@
 #pragma once
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "blueprint/codec.hpp"
 #include "sim/progress.hpp"
@@ -23,8 +24,10 @@ public:
 private:
     void rebuild();                 // (re)parse+compile source, reset world
     void resync_graph();            // text -> blueprint (no VM reset)
-    void advance(int64_t budget);   // run VM, trap errors
-    void step_one_action();         // run until one world tick elapses
+    bool all_finished() const;      // every drone VM done (or no program)
+    bool do_round();                // each live drone one action + tick
+    void advance(int64_t budget);   // run the fleet, trap errors
+    void step_one_action();         // one round
     void draw_controls();
     void draw_editor();
     void draw_farm();
@@ -39,9 +42,10 @@ private:
 
     sim::Progression prog_;  // persists across Reset (permanent progression)
     std::unique_ptr<sim::World> world_;
-    std::unique_ptr<sim::RobotHost> host_;
     std::unique_ptr<vm::Chunk> chunk_;
-    std::unique_ptr<vm::VM> vm_;
+    // One VM per drone over the same bytecode (N=1 == single-drone).
+    std::vector<std::unique_ptr<sim::RobotHost>> hosts_;
+    std::vector<std::unique_ptr<vm::VM>> vms_;
 
     blueprint::Graph graph_;        // blueprint view of the current program
     blueprint::LayoutStore layout_; // node positions kept by AST id

@@ -12,9 +12,14 @@ int RobotHost::arg_int(const std::vector<Value>& a, size_t i,
 }
 
 void RobotHost::consume_tick() {
-    if (world_.tick() >= max_ticks_)
-        throw RuntimeError("tick budget exceeded (program never finishes?)");
-    world_.advance_tick();
+    ++actions_;
+    if (auto_tick_) {  // single-drone: world advances per action
+        if (world_.tick() >= max_ticks_)
+            throw RuntimeError(
+                "tick budget exceeded (program never finishes?)");
+        world_.advance_tick();
+    }
+    // manual mode: the multi-drone runner advances the world per round.
 }
 
 Value RobotHost::call(const std::string& name,
@@ -25,15 +30,16 @@ Value RobotHost::call(const std::string& name,
         world_.set_watering(prog_->watering_unlocked());
         world_.set_polyculture(prog_->polyculture_unlocked());
     }
+    const int d = drone_;
 
     // tick-consuming actions
     if (name == "move") {
-        bool ok = world_.move(arg_int(args, 0, "move"));
+        bool ok = world_.move(d, arg_int(args, 0, "move"));
         consume_tick();
         return Value::B(ok);
     }
     if (name == "till") {
-        bool ok = world_.till();
+        bool ok = world_.till(d);
         consume_tick();
         return Value::B(ok);
     }
@@ -42,35 +48,37 @@ Value RobotHost::call(const std::string& name,
         bool locked = prog_ &&
             ((crop == CropCarrot && !prog_->crop_carrot_unlocked()) ||
              (crop == CropPumpkin && !prog_->crop_pumpkin_unlocked()));
-        bool ok = !locked && world_.plant(crop);
+        bool ok = !locked && world_.plant(d, crop);
         consume_tick();
         return Value::B(ok);
     }
     if (name == "fertilize") {
         bool locked = prog_ && !prog_->fertilizer_unlocked();
-        bool ok = !locked && world_.fertilize();
+        bool ok = !locked && world_.fertilize(d);
         consume_tick();
         return Value::B(ok);
     }
     if (name == "water") {
-        bool ok = world_.water();
+        bool ok = world_.water(d);
         consume_tick();
         return Value::B(ok);
     }
     if (name == "harvest") {
-        bool ok = world_.harvest();
+        bool ok = world_.harvest(d);
         consume_tick();
         return Value::B(ok);
     }
     if (name == "wait") {
-        world_.wait();
         consume_tick();
         return Value::I(0);
     }
+
     // free queries
-    if (name == "sense") return Value::I(world_.sense());
-    if (name == "pos") return Value::I(world_.pos_index());
-    if (name == "can_harvest") return Value::B(world_.can_harvest());
+    if (name == "sense") return Value::I(world_.sense(d));
+    if (name == "pos") return Value::I(world_.pos_index(d));
+    if (name == "can_harvest") return Value::B(world_.can_harvest(d));
+    if (name == "get_drone_id") return Value::I(d);
+    if (name == "num_drones") return Value::I(world_.drones());
     if (name == "inventory")
         return Value::I(world_.inventory_of(arg_int(args, 0, "inventory")));
     if (name == "num_items")

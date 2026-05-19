@@ -14,6 +14,7 @@ const UnlockDef& Progression::def(int id) {
         {"Fertilizer", 14},
         {"Pumpkin", 12},
         {"Polyculture", 16},
+        {"Drones", 20},
     }};
     static const UnlockDef unknown{"?", 0};
     if (id < 0 || id >= U_COUNT) return unknown;

@@ -41,7 +41,8 @@ App::App() {
 void App::rebuild() {
     error_.clear();
     running_ = false;
-    vm_.reset();
+    hosts_.clear();
+    vms_.clear();
     try {
         lang::Program prog = lang::parse(source_, prog_.feature_set());
         graph_ = blueprint::build(prog, layout_);  // keep node positions
@@ -49,11 +50,42 @@ void App::rebuild() {
         chunk_ = std::make_unique<vm::Chunk>(vm::compile(prog));
         int n = prog_.max_farm_size();
         world_ = std::make_unique<sim::World>(n, n);
-        host_ = std::make_unique<sim::RobotHost>(*world_, 1'000'000, &prog_);
-        vm_ = std::make_unique<vm::VM>(*chunk_, *host_);
+
+        int ndrones = prog_.drone_count();
+        while (world_->drones() < ndrones) world_->add_drone();
+        for (int i = 0; i < ndrones; ++i) {
+            hosts_.push_back(std::make_unique<sim::RobotHost>(
+                *world_, 1'000'000'000ull, &prog_, i, /*auto_tick*/ false));
+            vms_.push_back(std::make_unique<vm::VM>(*chunk_, *hosts_[i]));
+        }
     } catch (const std::exception& e) {
         error_ = e.what();
     }
+}
+
+bool App::all_finished() const {
+    if (vms_.empty()) return true;
+    for (auto& v : vms_)
+        if (!v->finished()) return false;
+    return true;
+}
+
+// One round: every live drone single-steps until it performs one timed
+// action (or its program ends); then the world advances one shared tick.
+bool App::do_round() {
+    bool any_live = false;
+    for (size_t i = 0; i < vms_.size(); ++i) {
+        if (vms_[i]->finished()) continue;
+        any_live = true;
+        uint64_t a0 = hosts_[i]->actions();
+        for (int guard = 0;
+             !vms_[i]->finished() && hosts_[i]->actions() == a0 &&
+                 guard < 500000;
+             ++guard)
+            vms_[i]->run(1);
+    }
+    if (any_live && world_) world_->advance_tick();
+    return any_live;
 }
 
 // Text edit -> re-derive the blueprint, preserving node positions by AST id.
@@ -70,9 +102,12 @@ void App::resync_graph() {
 }
 
 void App::advance(int64_t budget) {
-    if (!vm_ || vm_->finished()) return;
+    if (all_finished()) return;
+    int rounds = static_cast<int>(budget / 16);
+    if (rounds < 1) rounds = 1;
     try {
-        vm_->run(budget);
+        for (int r = 0; r < rounds; ++r)
+            if (!do_round()) break;
     } catch (const std::exception& e) {
         error_ = e.what();
         running_ = false;
@@ -80,12 +115,12 @@ void App::advance(int64_t budget) {
 }
 
 void App::step_one_action() {
-    if (!vm_ || vm_->finished()) return;
-    uint64_t t0 = world_->tick();
-    for (int guard = 0; guard < 100000; ++guard) {
-        advance(64);
-        if (!error_.empty() || vm_->finished()) break;
-        if (world_->tick() != t0) break;
+    if (all_finished()) return;
+    try {
+        do_round();
+    } catch (const std::exception& e) {
+        error_ = e.what();
+        running_ = false;
     }
 }
 
@@ -104,8 +139,10 @@ void App::draw_controls() {
     ImGui::SetNextWindowSize({360, 230}, ImGuiCond_FirstUseEver);
     ImGui::Begin("Control");
 
-    const bool done = !vm_ || vm_->finished();
-    if (ImGui::Button(running_ ? "Pause" : "Run") && vm_) running_ = !running_;
+    const bool has_prog = !vms_.empty();
+    const bool done = all_finished();
+    if (ImGui::Button(running_ ? "Pause" : "Run") && has_prog)
+        running_ = !running_;
     ImGui::SameLine();
     if (ImGui::Button("Step")) { running_ = false; step_one_action(); }
     ImGui::SameLine();
@@ -114,18 +151,22 @@ void App::draw_controls() {
     ImGui::SliderInt("Speed", &speed_, 1, 4000, "%d instr/frame");
 
     const char* st = !error_.empty() ? "ERROR"
-                     : !vm_          ? "no program"
+                     : !has_prog     ? "no program"
                      : done          ? "completed"
                      : running_      ? "running"
                                      : "paused";
     ImGui::Text("Status: %s", st);
     if (world_) {
-        ImGui::Text("Tick: %llu",
-                    static_cast<unsigned long long>(world_->tick()));
-        ImGui::Text("Robot: (%d, %d)", world_->rx(), world_->ry());
-        ImGui::Text("Wheat harvested: %lld",
-                    static_cast<long long>(
-                        world_->inventory_of(sim::CropWheat)));
+        ImGui::Text("Tick: %llu  |  Drones: %d",
+                    static_cast<unsigned long long>(world_->tick()),
+                    world_->drones());
+        for (int i = 0; i < world_->drones(); ++i)
+            ImGui::Text("  drone %d: (%d, %d)", i, world_->drone_x(i),
+                        world_->drone_y(i));
+        ImGui::Text("Wheat %lld  Carrot %lld  Pumpkin %lld",
+                    (long long)world_->inventory_of(sim::CropWheat),
+                    (long long)world_->inventory_of(sim::CropCarrot),
+                    (long long)world_->inventory_of(sim::CropPumpkin));
     }
     if (!error_.empty())
         ImGui::TextWrapped("%s", error_.c_str());
@@ -180,11 +221,16 @@ void App::draw_farm() {
             dl->AddRectFilled(a, b, col, 3.0f);
         }
     }
-    // robot
-    ImVec2 c{org.x + (world_->rx() + 0.5f) * cell,
-             org.y + (world_->ry() + 0.5f) * cell};
-    dl->AddCircleFilled(c, cell * 0.30f, IM_COL32(60, 140, 240, 255));
-    dl->AddCircle(c, cell * 0.30f, IM_COL32(255, 255, 255, 255), 0, 2.0f);
+    // drones
+    for (int i = 0; i < world_->drones(); ++i) {
+        ImVec2 c{org.x + (world_->drone_x(i) + 0.5f) * cell,
+                 org.y + (world_->drone_y(i) + 0.5f) * cell};
+        ImU32 col = (i == 0) ? IM_COL32(60, 140, 240, 255)
+                             : IM_COL32(240, 120, 60, 255);
+        dl->AddCircleFilled(c, cell * 0.30f, col);
+        dl->AddCircle(c, cell * 0.30f, IM_COL32(255, 255, 255, 255), 0,
+                      2.0f);
+    }
 
     ImGui::Dummy({gw * cell, gh * cell});
     ImGui::End();

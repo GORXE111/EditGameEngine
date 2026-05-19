@@ -21,6 +21,7 @@ enum Unlock : int {
     U_Fertilizer,        // mechanic: fertilize() instant-ripens
     U_Pumpkin,           // content: pumpkin crop (high yield)
     U_Polyculture,       // mechanic: companion-planting yield bonus
+    U_Drones,            // multi-drone (shared program)
     U_COUNT
 };
 
@@ -48,6 +49,7 @@ public:
     bool fertilizer_unlocked() const { return is_unlocked(U_Fertilizer); }
     bool polyculture_unlocked() const { return is_unlocked(U_Polyculture); }
     int max_farm_size() const { return is_unlocked(U_Expand) ? 6 : 4; }
+    int drone_count() const { return is_unlocked(U_Drones) ? 2 : 1; }
 
 private:
     std::unordered_set<int> done_;
