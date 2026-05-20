@@ -10,6 +10,7 @@
 #include "imnodes.h"
 
 #include "game/app.hpp"
+#include "game/theme.hpp"
 
 #include <cstdio>
 
@@ -39,7 +40,7 @@ int main(int, char**) {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImNodes::CreateContext();  // used by M4 blueprint editor
-    ImGui::StyleColorsDark();
+    farm::game::apply_theme();  // CJK font + FarmCode palette
     ImGui_ImplSDL2_InitForOpenGL(window, gl);
     ImGui_ImplOpenGL3_Init("#version 130");
 

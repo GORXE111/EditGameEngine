@@ -1,5 +1,6 @@
 #include "game/app.hpp"
 
+#include <algorithm>
 #include <exception>
 
 #include "imgui.h"
@@ -135,8 +136,8 @@ void App::frame() {
 }
 
 void App::draw_controls() {
-    ImGui::SetNextWindowPos({10, 10}, ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize({360, 230}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos({12, 12}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({320, 246}, ImGuiCond_FirstUseEver);
     ImGui::Begin("Control");
 
     const bool has_prog = !vms_.empty();
@@ -150,12 +151,16 @@ void App::draw_controls() {
 
     ImGui::SliderInt("Speed", &speed_, 1, 4000, "%d instr/frame");
 
-    const char* st = !error_.empty() ? "ERROR"
-                     : !has_prog     ? "no program"
-                     : done          ? "completed"
-                     : running_      ? "running"
-                                     : "paused";
-    ImGui::Text("Status: %s", st);
+    const char* st;
+    ImVec4 stc;
+    if (!error_.empty())     { st = "ERROR";      stc = ImVec4(0.91f,0.36f,0.36f,1); }
+    else if (!has_prog)      { st = "no program"; stc = ImVec4(0.55f,0.55f,0.55f,1); }
+    else if (done)           { st = "completed";  stc = ImVec4(0.40f,0.80f,0.70f,1); }
+    else if (running_)       { st = "running";    stc = ImVec4(0.50f,0.75f,0.50f,1); }
+    else                     { st = "paused";     stc = ImVec4(0.83f,0.66f,0.24f,1); }
+    ImGui::TextUnformatted("Status:");
+    ImGui::SameLine();
+    ImGui::TextColored(stc, "%s", st);
     if (world_) {
         ImGui::Text("Tick: %llu  |  Drones: %d",
                     static_cast<unsigned long long>(world_->tick()),
@@ -174,8 +179,8 @@ void App::draw_controls() {
 }
 
 void App::draw_editor() {
-    ImGui::SetNextWindowPos({10, 250}, ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize({360, 420}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos({12, 526}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({320, 262}, ImGuiCond_FirstUseEver);
     ImGui::Begin("Code");
     if (ImGui::Button("Apply & Reset")) rebuild();
     ImGui::SameLine();
@@ -187,8 +192,8 @@ void App::draw_editor() {
 }
 
 void App::draw_farm() {
-    ImGui::SetNextWindowPos({380, 10}, ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize({660, 540}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos({344, 12}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({522, 500}, ImGuiCond_FirstUseEver);
     ImGui::Begin("Farm");
     if (!world_) { ImGui::TextUnformatted("no world"); ImGui::End(); return; }
 
@@ -199,37 +204,90 @@ void App::draw_farm() {
     float cell = avail.x / gw;
     float maxcy = avail.y / gh;
     if (maxcy < cell) cell = maxcy;
-    if (cell < 8.0f) cell = 8.0f;
-    const float pad = 1.0f;
+    if (cell < 12.0f) cell = 12.0f;
 
+    // backdrop panel (slightly inset, soft border)
+    const float backR = 8.f;
+    ImVec2 bmin{org.x - 4, org.y - 4};
+    ImVec2 bmax{org.x + gw * cell + 4, org.y + gh * cell + 4};
+    dl->AddRectFilled(bmin, bmax, IM_COL32(20, 22, 26, 255), backR);
+    dl->AddRect(bmin, bmax, IM_COL32(60, 65, 78, 200), backR, 0, 1.5f);
+
+    const float pad = 1.5f;
     for (int y = 0; y < gh; ++y) {
         for (int x = 0; x < gw; ++x) {
             const sim::Tile& t = world_->tile(x, y);
-            ImU32 col;
-            if (t.crop != sim::CropNone) {
-                bool ripe = t.age >= sim::crop_maturity(t.crop);
-                col = ripe ? IM_COL32(240, 200, 60, 255)   // gold
-                           : IM_COL32(90, 170, 80, 255);   // green
-            } else if (t.tilled) {
-                col = IM_COL32(105, 75, 50, 255);          // tilled soil
+            ImU32 top, bot;
+            if (t.tilled) {
+                top = IM_COL32(112, 80, 54, 255);   // tilled soil (warm)
+                bot = IM_COL32(86, 60, 40, 255);
             } else {
-                col = IM_COL32(70, 100, 55, 255);          // wild
+                top = IM_COL32(86, 122, 70, 255);   // wild grass
+                bot = IM_COL32(64, 96, 54, 255);
             }
             ImVec2 a{org.x + x * cell + pad, org.y + y * cell + pad};
             ImVec2 b{org.x + (x + 1) * cell - pad,
                      org.y + (y + 1) * cell - pad};
-            dl->AddRectFilled(a, b, col, 3.0f);
+            dl->AddRectFilledMultiColor(a, b, top, top, bot, bot);
+            // thin inner highlight at top — gives a 'card' feel
+            dl->AddLine({a.x + 1, a.y + 1}, {b.x - 1, a.y + 1},
+                        IM_COL32(255, 255, 255, 22), 1.0f);
+
+            // watered dot (corner)
+            if (t.watered)
+                dl->AddCircleFilled({a.x + 6, a.y + 6}, 3.f,
+                                    IM_COL32(120, 190, 235, 220));
+
+            // crop sprite
+            if (t.crop != sim::CropNone) {
+                int m = sim::crop_maturity(t.crop);
+                float g = m > 0 ? std::min(1.f, (float)t.age / (float)m)
+                                : 1.f;
+                bool ripe = (g >= 1.f);
+                ImVec2 c{(a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f};
+                float r = cell * (0.16f + 0.22f * g);  // grows with age
+                if (t.crop == sim::CropWheat) {
+                    ImU32 col = ripe ? IM_COL32(238, 200, 70, 255)
+                                     : IM_COL32(120, 175, 80, 255);
+                    dl->AddCircleFilled(c, r, col, 20);
+                } else if (t.crop == sim::CropCarrot) {
+                    // small downward triangle (carrot)
+                    ImU32 col = ripe ? IM_COL32(235, 132, 50, 255)
+                                     : IM_COL32(140, 170, 80, 255);
+                    dl->AddTriangleFilled({c.x - r, c.y - r},
+                                          {c.x + r, c.y - r},
+                                          {c.x, c.y + r * 1.2f}, col);
+                } else if (t.crop == sim::CropPumpkin) {
+                    ImU32 col = ripe ? IM_COL32(225, 110, 50, 255)
+                                     : IM_COL32(150, 170, 75, 255);
+                    dl->AddCircleFilled(c, r * 1.05f, col, 20);
+                }
+                if (ripe)  // mature halo
+                    dl->AddCircle(c, r + 2.f, IM_COL32(255, 240, 180, 180),
+                                  24, 1.8f);
+            }
         }
     }
-    // drones
+
+    // drones — rounded badge with drop shadow + stroke
+    static const ImU32 drone_cols[] = {
+        IM_COL32(70, 150, 240, 255),  // blue
+        IM_COL32(240, 130, 60, 255),  // orange
+        IM_COL32(190, 100, 220, 255), // violet
+        IM_COL32(80, 200, 170, 255),  // teal
+    };
     for (int i = 0; i < world_->drones(); ++i) {
         ImVec2 c{org.x + (world_->drone_x(i) + 0.5f) * cell,
                  org.y + (world_->drone_y(i) + 0.5f) * cell};
-        ImU32 col = (i == 0) ? IM_COL32(60, 140, 240, 255)
-                             : IM_COL32(240, 120, 60, 255);
-        dl->AddCircleFilled(c, cell * 0.30f, col);
-        dl->AddCircle(c, cell * 0.30f, IM_COL32(255, 255, 255, 255), 0,
-                      2.0f);
+        float s = cell * 0.30f;
+        ImVec2 a{c.x - s, c.y - s}, b{c.x + s, c.y + s};
+        // shadow
+        dl->AddRectFilled({a.x + 2, a.y + 3}, {b.x + 2, b.y + 3},
+                          IM_COL32(0, 0, 0, 90), 5.f);
+        dl->AddRectFilled(a, b,
+                          drone_cols[i % (int)IM_ARRAYSIZE(drone_cols)],
+                          5.f);
+        dl->AddRect(a, b, IM_COL32(255, 255, 255, 220), 5.f, 0, 1.6f);
     }
 
     ImGui::Dummy({gw * cell, gh * cell});
@@ -328,8 +386,8 @@ bool is_value_node(farm::blueprint::NK k) {
 }  // namespace
 
 void App::draw_blueprint() {
-    ImGui::SetNextWindowPos({380, 560}, ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize({660, 230}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos({876, 12}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({392, 776}, ImGuiCond_FirstUseEver);
     ImGui::Begin("Blueprint");
 
     if (ImGui::Button("Apply blueprint -> run")) {
@@ -463,8 +521,8 @@ void App::draw_blueprint() {
 }
 
 void App::draw_tech() {
-    ImGui::SetNextWindowPos({1050, 10}, ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize({220, 430}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos({12, 266}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({320, 252}, ImGuiCond_FirstUseEver);
     ImGui::Begin("Tech");
 
     long long wheat =

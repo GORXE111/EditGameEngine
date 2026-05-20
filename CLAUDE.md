@@ -57,6 +57,7 @@ MSVC 工具链：VS2022 Community @ `D:\VS2022`（非默认路径）。
 - [x] E1 TFWR 机制深化  ← 浇水x2生长/化肥瞬熟/南瓜(高产)/伴生加成，46用例213断言全过
 - [x] E2 共享程序多无人机  ← World多drone+RobotHost手动tick+Fleet调度+get_drone_id()，51用例229断言全过
 - [x] E3 语言 v2 — 数组/列表  ← 列表/下标/SetIndex/len/append + U_Lists 门控 + 蓝图往返，58用例267断言全过
+- [x] P1 UI 与画面打磨  ← Microsoft YaHei CJK字体 + FarmCode暖系主题 + 农场重绘(渐变格/作物形状/成熟光晕/机器人徽章+阴影) + 五面板布局重排 + 状态彩色
 
 测试累计 58 用例 / 267 断言全绿。
 
