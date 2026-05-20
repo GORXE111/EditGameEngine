@@ -7,6 +7,7 @@
 #include "imgui_stdlib.h"
 #include "imnodes.h"
 #include "blueprint/codec.hpp"
+#include "game/i18n.hpp"
 #include "lang/parser.hpp"
 #include "lang/printer.hpp"
 #include "vm/compiler.hpp"
@@ -14,6 +15,17 @@
 namespace farm::game {
 
 namespace {
+// "Display###StableId" pattern: ImGui uses the part after ### as the
+// stable window identity, so localized titles can change without losing
+// position/size state across language switches.
+const char* wtitle(const char* key, const char* stable_id) {
+    static thread_local std::string buf;
+    buf = Loc::tr(key);
+    buf += "###";
+    buf += stable_id;
+    return buf.c_str();
+}
+
 // Start of progression: loops / conditionals / functions are LOCKED.
 // Base language only (assignment, native calls, return). Farm wheat,
 // then open the Tech panel and unlock features to scale up.
@@ -128,6 +140,25 @@ void App::step_one_action() {
 void App::frame() {
     if (src_dirty_) { resync_graph(); src_dirty_ = false; }
     if (running_) advance(speed_);
+
+    // top menu bar — Settings > Language
+    if (ImGui::BeginMainMenuBar()) {
+        if (ImGui::BeginMenu(Loc::tr("menu.settings"))) {
+            if (ImGui::BeginMenu(Loc::tr("label.language"))) {
+                Lang cur = Loc::get();
+                if (ImGui::MenuItem(Loc::tr("lang.zh"), nullptr,
+                                    cur == Lang::ZH))
+                    Loc::set(Lang::ZH);
+                if (ImGui::MenuItem(Loc::tr("lang.en"), nullptr,
+                                    cur == Lang::EN))
+                    Loc::set(Lang::EN);
+                ImGui::EndMenu();
+            }
+            ImGui::EndMenu();
+        }
+        ImGui::EndMainMenuBar();
+    }
+
     draw_controls();
     draw_editor();
     draw_farm();
@@ -136,39 +167,55 @@ void App::frame() {
 }
 
 void App::draw_controls() {
-    ImGui::SetNextWindowPos({12, 12}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos({12, 34}, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize({320, 246}, ImGuiCond_FirstUseEver);
-    ImGui::Begin("Control");
+    ImGui::Begin(wtitle("panel.control", "ctl"));
 
     const bool has_prog = !vms_.empty();
     const bool done = all_finished();
-    if (ImGui::Button(running_ ? "Pause" : "Run") && has_prog)
+    if (ImGui::Button(running_ ? Loc::tr("btn.pause") : Loc::tr("btn.run")) &&
+        has_prog)
         running_ = !running_;
     ImGui::SameLine();
-    if (ImGui::Button("Step")) { running_ = false; step_one_action(); }
+    if (ImGui::Button(Loc::tr("btn.step"))) {
+        running_ = false;
+        step_one_action();
+    }
     ImGui::SameLine();
-    if (ImGui::Button("Reset")) rebuild();
+    if (ImGui::Button(Loc::tr("btn.reset"))) rebuild();
 
-    ImGui::SliderInt("Speed", &speed_, 1, 4000, "%d instr/frame");
+    ImGui::SliderInt(Loc::tr("label.speed"), &speed_, 1, 4000,
+                     Loc::tr("label.speed_unit"));
 
     const char* st;
     ImVec4 stc;
-    if (!error_.empty())     { st = "ERROR";      stc = ImVec4(0.91f,0.36f,0.36f,1); }
-    else if (!has_prog)      { st = "no program"; stc = ImVec4(0.55f,0.55f,0.55f,1); }
-    else if (done)           { st = "completed";  stc = ImVec4(0.40f,0.80f,0.70f,1); }
-    else if (running_)       { st = "running";    stc = ImVec4(0.50f,0.75f,0.50f,1); }
-    else                     { st = "paused";     stc = ImVec4(0.83f,0.66f,0.24f,1); }
-    ImGui::TextUnformatted("Status:");
+    if (!error_.empty()) {
+        st = Loc::tr("status.error");
+        stc = ImVec4(0.91f, 0.36f, 0.36f, 1);
+    } else if (!has_prog) {
+        st = Loc::tr("status.no_program");
+        stc = ImVec4(0.55f, 0.55f, 0.55f, 1);
+    } else if (done) {
+        st = Loc::tr("status.completed");
+        stc = ImVec4(0.40f, 0.80f, 0.70f, 1);
+    } else if (running_) {
+        st = Loc::tr("status.running");
+        stc = ImVec4(0.50f, 0.75f, 0.50f, 1);
+    } else {
+        st = Loc::tr("status.paused");
+        stc = ImVec4(0.83f, 0.66f, 0.24f, 1);
+    }
+    ImGui::Text("%s:", Loc::tr("label.status"));
     ImGui::SameLine();
     ImGui::TextColored(stc, "%s", st);
     if (world_) {
-        ImGui::Text("Tick: %llu  |  Drones: %d",
+        ImGui::Text("%s: %llu  |  %s: %d", Loc::tr("label.tick"),
                     static_cast<unsigned long long>(world_->tick()),
-                    world_->drones());
+                    Loc::tr("label.drones"), world_->drones());
         for (int i = 0; i < world_->drones(); ++i)
-            ImGui::Text("  drone %d: (%d, %d)", i, world_->drone_x(i),
+            ImGui::Text(Loc::tr("label.drone_at"), i, world_->drone_x(i),
                         world_->drone_y(i));
-        ImGui::Text("Wheat %lld  Carrot %lld  Pumpkin %lld",
+        ImGui::Text(Loc::tr("label.inventory"),
                     (long long)world_->inventory_of(sim::CropWheat),
                     (long long)world_->inventory_of(sim::CropCarrot),
                     (long long)world_->inventory_of(sim::CropPumpkin));
@@ -179,12 +226,12 @@ void App::draw_controls() {
 }
 
 void App::draw_editor() {
-    ImGui::SetNextWindowPos({12, 526}, ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize({320, 262}, ImGuiCond_FirstUseEver);
-    ImGui::Begin("Code");
-    if (ImGui::Button("Apply & Reset")) rebuild();
+    ImGui::SetNextWindowPos({12, 548}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({320, 240}, ImGuiCond_FirstUseEver);
+    ImGui::Begin(wtitle("panel.code", "code"));
+    if (ImGui::Button(Loc::tr("btn.apply_reset"))) rebuild();
     ImGui::SameLine();
-    ImGui::TextDisabled("(edit, then Apply)");
+    ImGui::TextDisabled("%s", Loc::tr("hint.edit_apply"));
     ImVec2 sz = ImGui::GetContentRegionAvail();
     if (ImGui::InputTextMultiline("##src", &source_, sz))
         src_dirty_ = true;  // live text -> blueprint sync next frame
@@ -192,10 +239,14 @@ void App::draw_editor() {
 }
 
 void App::draw_farm() {
-    ImGui::SetNextWindowPos({344, 12}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos({344, 34}, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize({522, 500}, ImGuiCond_FirstUseEver);
-    ImGui::Begin("Farm");
-    if (!world_) { ImGui::TextUnformatted("no world"); ImGui::End(); return; }
+    ImGui::Begin(wtitle("panel.farm", "farm"));
+    if (!world_) {
+        ImGui::TextUnformatted(Loc::tr("label.no_world"));
+        ImGui::End();
+        return;
+    }
 
     const int gw = world_->width(), gh = world_->height();
     ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -312,26 +363,138 @@ const char* op_text(farm::lang::Tok t) {
 
 std::string node_label(const farm::blueprint::Node& n) {
     using farm::blueprint::NK;
+    using farm::game::Loc;
+    using farm::game::native_title;
     switch (n.kind) {
-        case NK::Entry: return "Entry";
-        case NK::Assign: return "Set " + n.name;
-        case NK::CallStmt: return n.name + "()";
-        case NK::If: return "If";
-        case NK::While: return "While";
-        case NK::Repeat: return "Repeat";
-        case NK::Return: return "Return";
-        case NK::FuncDef: return "func " + n.name;
-        case NK::IntLit: return std::to_string(n.ival);
-        case NK::BoolLit: return n.bval ? "true" : "false";
-        case NK::VarGet: return n.name;
-        case NK::Unary: return op_text(n.op);
-        case NK::Binary: return op_text(n.op);
-        case NK::CallExpr: return n.name + "()";
-        case NK::SetIndex: return "Set []";
-        case NK::ListLit: return "[ list ]";
-        case NK::IndexGet: return "Index []";
+        case NK::Entry:    return Loc::tr("node.entry");
+        case NK::Assign:   return std::string(Loc::tr("node.assign_prefix")) +
+                                  n.name;
+        case NK::CallStmt: return native_title(n.name);
+        case NK::If:       return Loc::tr("node.if");
+        case NK::While:    return Loc::tr("node.while");
+        case NK::Repeat:   return Loc::tr("node.repeat");
+        case NK::Return:   return Loc::tr("node.return");
+        case NK::FuncDef:  return std::string(Loc::tr("node.funcdef_prefix")) +
+                                  n.name;
+        case NK::IntLit:   return std::to_string(n.ival);
+        case NK::BoolLit:  return n.bval ? "true" : "false";
+        case NK::VarGet:   return n.name;
+        case NK::Unary:    return op_text(n.op);
+        case NK::Binary:   return op_text(n.op);
+        case NK::CallExpr: return native_title(n.name);
+        case NK::SetIndex: return Loc::tr("node.setindex");
+        case NK::ListLit:  return Loc::tr("node.listlit");
+        case NK::IndexGet: return Loc::tr("node.indexget");
     }
     return "?";
+}
+
+// Categorize a node for title-bar colouring. Helps the player tell
+// gameplay actions, free queries, control-flow, math, and data apart.
+enum class Cat {
+    Action,    // tick-consuming robot action (warm red)
+    Sense,     // free query / sensor (cool blue)
+    Flow,      // control flow (purple)
+    Op,        // arithmetic / logic (teal)
+    Listy,     // list / index ops (green)
+    Var,       // variable get/set (amber)
+    Literal,   // constants (grey)
+    Entry,     // entry node (neutral dark)
+    Misc       // fallback
+};
+
+bool is_action_native(const std::string& n) {
+    return n == "move" || n == "till" || n == "plant" || n == "water" ||
+           n == "fertilize" || n == "harvest" || n == "wait" ||
+           n == "unlock";
+}
+bool is_sense_native(const std::string& n) {
+    return n == "sense" || n == "pos" || n == "can_harvest" ||
+           n == "inventory" || n == "num_items" || n == "get_drone_id" ||
+           n == "num_drones" || n == "get_cost" || n == "num_unlocked";
+}
+bool is_list_native(const std::string& n) {
+    return n == "len" || n == "append";
+}
+
+Cat node_cat(const farm::blueprint::Node& n) {
+    using farm::blueprint::NK;
+    switch (n.kind) {
+        case NK::Entry: return Cat::Entry;
+        case NK::If: case NK::While: case NK::Repeat: case NK::Return:
+        case NK::FuncDef: return Cat::Flow;
+        case NK::Assign: case NK::VarGet: return Cat::Var;
+        case NK::Unary: case NK::Binary: return Cat::Op;
+        case NK::IntLit: case NK::BoolLit: return Cat::Literal;
+        case NK::ListLit: case NK::IndexGet: case NK::SetIndex:
+            return Cat::Listy;
+        case NK::CallStmt: case NK::CallExpr:
+            if (is_action_native(n.name)) return Cat::Action;
+            if (is_sense_native(n.name)) return Cat::Sense;
+            if (is_list_native(n.name)) return Cat::Listy;
+            return Cat::Misc;
+    }
+    return Cat::Misc;
+}
+
+struct TitleCol { ImU32 bar, hov, sel; };
+TitleCol cat_color(Cat c) {
+    switch (c) {
+        case Cat::Action:  return {IM_COL32(176, 70, 50, 255),
+                                   IM_COL32(206,100, 75,255),
+                                   IM_COL32(226,120, 95,255)};
+        case Cat::Sense:   return {IM_COL32(48,108,170,255),
+                                   IM_COL32(72,138,200,255),
+                                   IM_COL32(96,162,224,255)};
+        case Cat::Flow:    return {IM_COL32(108, 72,166,255),
+                                   IM_COL32(134, 98,196,255),
+                                   IM_COL32(160,124,222,255)};
+        case Cat::Op:      return {IM_COL32( 58,140,124,255),
+                                   IM_COL32( 84,170,154,255),
+                                   IM_COL32(110,196,180,255)};
+        case Cat::Listy:   return {IM_COL32( 96,148, 64,255),
+                                   IM_COL32(120,176, 88,255),
+                                   IM_COL32(146,202,114,255)};
+        case Cat::Var:     return {IM_COL32(176,135, 58,255),
+                                   IM_COL32(206,165, 88,255),
+                                   IM_COL32(226,185,108,255)};
+        case Cat::Literal: return {IM_COL32( 88, 96,112,255),
+                                   IM_COL32(118,126,142,255),
+                                   IM_COL32(146,154,170,255)};
+        case Cat::Entry:   return {IM_COL32( 56, 60, 72,255),
+                                   IM_COL32( 80, 84, 96,255),
+                                   IM_COL32(104,108,120,255)};
+        case Cat::Misc:    return {IM_COL32( 72, 78, 92,255),
+                                   IM_COL32(100,106,120,255),
+                                   IM_COL32(128,134,148,255)};
+    }
+    return {0, 0, 0};
+}
+
+// Pin label for the k-th value-input of a node, localized per kind/native.
+const char* val_pin_label(const farm::blueprint::Node& n, int k) {
+    using farm::blueprint::NK;
+    using farm::game::Loc;
+    using farm::game::native_pin;
+    switch (n.kind) {
+        case NK::Assign:   return Loc::tr("pin.value");
+        case NK::If: case NK::While: return Loc::tr("pin.cond");
+        case NK::Repeat:   return Loc::tr("pin.count");
+        case NK::Return:   return Loc::tr("pin.value");
+        case NK::Unary:    return Loc::tr("pin.x");
+        case NK::Binary:   return (k == 0) ? Loc::tr("pin.a")
+                                           : Loc::tr("pin.b");
+        case NK::IndexGet:
+            return (k == 0) ? Loc::tr("pin.list") : Loc::tr("pin.index");
+        case NK::SetIndex:
+            return (k == 0) ? Loc::tr("pin.list")
+                 : (k == 1) ? Loc::tr("pin.index")
+                            : Loc::tr("pin.value");
+        case NK::ListLit:  return Loc::tr("pin.element");
+        case NK::CallStmt: case NK::CallExpr:
+            return native_pin(n.name, k);
+        default:           return "";
+    }
 }
 
 const farm::lang::Tok kBinOps[] = {
@@ -386,11 +549,11 @@ bool is_value_node(farm::blueprint::NK k) {
 }  // namespace
 
 void App::draw_blueprint() {
-    ImGui::SetNextWindowPos({876, 12}, ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize({392, 776}, ImGuiCond_FirstUseEver);
-    ImGui::Begin("Blueprint");
+    ImGui::SetNextWindowPos({876, 34}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({392, 754}, ImGuiCond_FirstUseEver);
+    ImGui::Begin(wtitle("panel.blueprint", "bp"));
 
-    if (ImGui::Button("Apply blueprint -> run")) {
+    if (ImGui::Button(Loc::tr("btn.apply_bp"))) {
         try {
             source_ = lang::print(blueprint::to_ast(graph_));
             rebuild();
@@ -399,7 +562,7 @@ void App::draw_blueprint() {
         }
     }
     ImGui::SameLine();
-    ImGui::TextDisabled("(drag nodes; edit values -> code updates live)");
+    ImGui::TextDisabled("%s", Loc::tr("hint.bp_edit"));
 
     bool edited = false;
     ImNodes::BeginNodeEditor();
@@ -410,6 +573,11 @@ void App::draw_blueprint() {
         int ni = static_cast<int>(i);
         if (!graph_laid_)
             ImNodes::SetNodeGridSpacePos(ni, ImVec2(n.x, n.y));
+
+        TitleCol tc = cat_color(node_cat(n));
+        ImNodes::PushColorStyle(ImNodesCol_TitleBar, tc.bar);
+        ImNodes::PushColorStyle(ImNodesCol_TitleBarHovered, tc.hov);
+        ImNodes::PushColorStyle(ImNodesCol_TitleBarSelected, tc.sel);
 
         ImNodes::BeginNode(ni);
         ImGui::PushID(ni);
@@ -442,40 +610,43 @@ void App::draw_blueprint() {
 
         if (has_exec_in(n.kind)) {
             ImNodes::BeginInputAttribute(pin(ni, kExecIn));
-            ImGui::TextUnformatted("in");
+            ImGui::TextUnformatted(Loc::tr("pin.in"));
             ImNodes::EndInputAttribute();
         }
         for (size_t k = 0; k < n.in.size(); ++k) {
             ImNodes::BeginInputAttribute(pin(ni, kValIn0 + (int)k));
-            ImGui::Text("arg%zu", k);
+            ImGui::TextUnformatted(val_pin_label(n, (int)k));
             ImNodes::EndInputAttribute();
         }
         // value output for expression nodes
         if (is_value_node(n.kind)) {
             ImNodes::BeginOutputAttribute(pin(ni, kValOut));
-            ImGui::TextUnformatted("val");
+            ImGui::TextUnformatted(Loc::tr("pin.value_out"));
             ImNodes::EndOutputAttribute();
         }
         if (!is_value_node(n.kind)) {  // exec node (incl. Entry)
             ImNodes::BeginOutputAttribute(pin(ni, kExecOut));
-            ImGui::TextUnformatted("next");
+            ImGui::TextUnformatted(Loc::tr("pin.next"));
             ImNodes::EndOutputAttribute();
             if (n.kind == blueprint::NK::If) {
                 ImNodes::BeginOutputAttribute(pin(ni, kBranchA));
-                ImGui::TextUnformatted("then");
+                ImGui::TextUnformatted(Loc::tr("pin.then"));
                 ImNodes::EndOutputAttribute();
                 ImNodes::BeginOutputAttribute(pin(ni, kBranchB));
-                ImGui::TextUnformatted("else");
+                ImGui::TextUnformatted(Loc::tr("pin.else"));
                 ImNodes::EndOutputAttribute();
             } else if (n.kind == blueprint::NK::While ||
                        n.kind == blueprint::NK::Repeat) {
                 ImNodes::BeginOutputAttribute(pin(ni, kBranchA));
-                ImGui::TextUnformatted("body");
+                ImGui::TextUnformatted(Loc::tr("pin.body"));
                 ImNodes::EndOutputAttribute();
             }
         }
         ImGui::PopID();
         ImNodes::EndNode();
+        ImNodes::PopColorStyle();
+        ImNodes::PopColorStyle();
+        ImNodes::PopColorStyle();
     }
 
     int link_id = 0;
@@ -521,29 +692,30 @@ void App::draw_blueprint() {
 }
 
 void App::draw_tech() {
-    ImGui::SetNextWindowPos({12, 266}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos({12, 288}, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize({320, 252}, ImGuiCond_FirstUseEver);
-    ImGui::Begin("Tech");
+    ImGui::Begin(wtitle("panel.tech", "tech"));
 
     long long wheat =
         world_ ? static_cast<long long>(
                      world_->inventory_of(sim::CropWheat))
                : 0;
-    ImGui::Text("Wheat: %lld", wheat);
-    ImGui::TextDisabled("收获小麦换解锁");
+    ImGui::Text("%s: %lld", Loc::tr("label.wheat"), wheat);
+    ImGui::TextDisabled("%s", Loc::tr("hint.tech_subtitle"));
     ImGui::Separator();
 
     for (int id = 0; id < sim::U_COUNT; ++id) {
         const sim::UnlockDef& d = sim::Progression::def(id);
         ImGui::PushID(id);
         if (prog_.is_unlocked(id)) {
-            ImGui::TextDisabled("%s  [unlocked]", d.name);
+            ImGui::TextDisabled("%s  %s", tech_name(d.name),
+                                Loc::tr("label.unlocked_tag"));
         } else {
-            ImGui::Text("%s  (%d)", d.name, d.cost_wheat);
+            ImGui::Text("%s  (%d)", tech_name(d.name), d.cost_wheat);
             ImGui::SameLine();
             bool afford = world_ && wheat >= d.cost_wheat;
             if (!afford) ImGui::BeginDisabled();
-            if (ImGui::SmallButton("Unlock") && world_ &&
+            if (ImGui::SmallButton(Loc::tr("btn.unlock")) && world_ &&
                 world_->spend(sim::CropWheat, d.cost_wheat)) {
                 prog_.grant(id);
                 src_dirty_ = true;  // re-validate editor w/ new features
@@ -554,7 +726,7 @@ void App::draw_tech() {
     }
 
     ImGui::Separator();
-    ImGui::TextWrapped("也可在代码里调用 unlock(id) 自助解锁。");
+    ImGui::TextWrapped("%s", Loc::tr("hint.unlock_code"));
     ImGui::End();
 }
 

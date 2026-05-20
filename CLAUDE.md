@@ -58,6 +58,7 @@ MSVC 工具链：VS2022 Community @ `D:\VS2022`（非默认路径）。
 - [x] E2 共享程序多无人机  ← World多drone+RobotHost手动tick+Fleet调度+get_drone_id()，51用例229断言全过
 - [x] E3 语言 v2 — 数组/列表  ← 列表/下标/SetIndex/len/append + U_Lists 门控 + 蓝图往返，58用例267断言全过
 - [x] P1 UI 与画面打磨  ← Microsoft YaHei CJK字体 + FarmCode暖系主题 + 农场重绘(渐变格/作物形状/成熟光晕/机器人徽章+阴影) + 五面板布局重排 + 状态彩色
+- [x] P2 本地化 + 蓝图玩家友好化  ← i18n 模块(Settings→Language 中文/English) + 节点人话标题/按角色着色(动作/感知/控制流/运算/列表/字面量/变量) + 输入针语义化("作物"/"条件"不再是 arg0) + 科技/状态/按钮/面板全本地化
 
 测试累计 58 用例 / 267 断言全绿。
 
