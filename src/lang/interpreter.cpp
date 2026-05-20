@@ -70,8 +70,43 @@ struct Interp {
             }
             case ExprKind::Binary: return eval_binary(e, f);
             case ExprKind::Call: return eval_call(e, f);
+            case ExprKind::ListLit: {
+                auto v = std::make_shared<std::vector<Value>>();
+                v->reserve(e.args.size());
+                for (auto& a : e.args) v->push_back(eval(*a, f));
+                return Value::L(std::move(v));
+            }
+            case ExprKind::Index: {
+                Value c = eval(*e.lhs, f);
+                Value ix = eval(*e.rhs, f);
+                need(c.is_list(), "indexing requires a list");
+                need(ix.is_int(), "list index must be an int");
+                if (ix.i < 0 ||
+                    ix.i >= static_cast<int64_t>(c.list->size()))
+                    rterr("list index out of range");
+                return (*c.list)[static_cast<size_t>(ix.i)];
+            }
         }
         rterr("bad expr");
+    }
+
+    // Language builtins (work without a host). Returns true if handled.
+    bool builtin(const std::string& name, const std::vector<Value>& args,
+                 Value& out) {
+        if (name == "len") {
+            if (args.size() != 1 || !args[0].is_list())
+                rterr("len(list) expected");
+            out = Value::I(static_cast<int64_t>(args[0].list->size()));
+            return true;
+        }
+        if (name == "append") {
+            if (args.size() != 2 || !args[0].is_list())
+                rterr("append(list, value) expected");
+            args[0].list->push_back(args[1]);
+            out = Value::I(0);
+            return true;
+        }
+        return false;
     }
 
     Value eval_binary(const Expr& e, Frame& f) {
@@ -124,6 +159,9 @@ struct Interp {
         args.reserve(e.args.size());
         for (auto& a : e.args) args.push_back(eval(*a, f));
 
+        Value b;
+        if (builtin(e.name, args, b)) return b;
+
         auto it = funcs.find(e.name);
         if (it == funcs.end()) return host.call(e.name, args);  // native
 
@@ -165,6 +203,18 @@ struct Interp {
             case StmtKind::ExprStmt:
                 eval(*s.expr, f);
                 return false;
+            case StmtKind::SetIndex: {
+                const Expr& tgt = *s.target;  // an Index expr
+                Value c = eval(*tgt.lhs, f);
+                Value ix = eval(*tgt.rhs, f);
+                need(c.is_list(), "indexed assignment requires a list");
+                need(ix.is_int(), "list index must be an int");
+                if (ix.i < 0 ||
+                    ix.i >= static_cast<int64_t>(c.list->size()))
+                    rterr("list index out of range");
+                (*c.list)[static_cast<size_t>(ix.i)] = eval(*s.expr, f);
+                return false;
+            }
             case StmtKind::Return:
                 *ret = s.has_value ? eval(*s.expr, f) : Value::I(0);
                 return true;

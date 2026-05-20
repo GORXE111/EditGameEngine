@@ -19,7 +19,10 @@ namespace farm::blueprint {
 enum class NK {
     Entry,                                   // program start
     Assign, CallStmt, If, While, Repeat, Return, FuncDef,  // exec/statements
-    IntLit, BoolLit, VarGet, Unary, Binary, CallExpr        // value/exprs
+    SetIndex,                                // a[i] = v  (in: coll,idx,val)
+    IntLit, BoolLit, VarGet, Unary, Binary, CallExpr,       // value/exprs
+    ListLit,                                 // [..]  (in: elements)
+    IndexGet                                 // a[i]  (in: coll, idx)
 };
 
 struct Node {

@@ -76,6 +76,22 @@ struct Printer {
                 if (wrap) os << ')';
                 return;
             }
+            case ExprKind::ListLit: {
+                os << '[';
+                for (size_t i = 0; i < e.args.size(); ++i) {
+                    if (i) os << ", ";
+                    expr(*e.args[i], 1, false);
+                }
+                os << ']';
+                return;
+            }
+            case ExprKind::Index: {
+                expr(*e.lhs, 100, false);  // collection (wrap non-atoms)
+                os << '[';
+                expr(*e.rhs, 1, false);
+                os << ']';
+                return;
+            }
         }
     }
 
@@ -94,6 +110,12 @@ struct Printer {
                 os << '\n';
                 return;
             case StmtKind::ExprStmt:
+                expr(*s.expr, 1, false);
+                os << '\n';
+                return;
+            case StmtKind::SetIndex:
+                expr(*s.target, 1, false);  // an Index expr
+                os << " = ";
                 expr(*s.expr, 1, false);
                 os << '\n';
                 return;

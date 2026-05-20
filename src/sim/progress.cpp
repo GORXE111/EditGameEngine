@@ -15,6 +15,7 @@ const UnlockDef& Progression::def(int id) {
         {"Pumpkin", 12},
         {"Polyculture", 16},
         {"Drones", 20},
+        {"Lists", 18},
     }};
     static const UnlockDef unknown{"?", 0};
     if (id < 0 || id >= U_COUNT) return unknown;
@@ -28,6 +29,7 @@ farm::lang::FeatureSet Progression::feature_set() const {
     if (is_unlocked(U_Loops)) fs.add(Feature::Loops);
     if (is_unlocked(U_Repeat)) fs.add(Feature::RepeatLoop);
     if (is_unlocked(U_Functions)) fs.add(Feature::Functions);
+    if (is_unlocked(U_Lists)) fs.add(Feature::Lists);
     return fs;
 }
 

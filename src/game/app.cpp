@@ -269,6 +269,9 @@ std::string node_label(const farm::blueprint::Node& n) {
         case NK::Unary: return op_text(n.op);
         case NK::Binary: return op_text(n.op);
         case NK::CallExpr: return n.name + "()";
+        case NK::SetIndex: return "Set []";
+        case NK::ListLit: return "[ list ]";
+        case NK::IndexGet: return "Index []";
     }
     return "?";
 }
@@ -312,7 +315,14 @@ bool has_exec_in(farm::blueprint::NK k) {
     using farm::blueprint::NK;
     return k == NK::Assign || k == NK::CallStmt || k == NK::If ||
            k == NK::While || k == NK::Repeat || k == NK::Return ||
-           k == NK::FuncDef;
+           k == NK::FuncDef || k == NK::SetIndex;
+}
+
+bool is_value_node(farm::blueprint::NK k) {
+    using farm::blueprint::NK;
+    return k == NK::IntLit || k == NK::BoolLit || k == NK::VarGet ||
+           k == NK::Unary || k == NK::Binary || k == NK::CallExpr ||
+           k == NK::ListLit || k == NK::IndexGet;
 }
 
 }  // namespace
@@ -383,22 +393,12 @@ void App::draw_blueprint() {
             ImNodes::EndInputAttribute();
         }
         // value output for expression nodes
-        if (n.kind == blueprint::NK::IntLit ||
-            n.kind == blueprint::NK::BoolLit ||
-            n.kind == blueprint::NK::VarGet ||
-            n.kind == blueprint::NK::Unary ||
-            n.kind == blueprint::NK::Binary ||
-            n.kind == blueprint::NK::CallExpr) {
+        if (is_value_node(n.kind)) {
             ImNodes::BeginOutputAttribute(pin(ni, kValOut));
             ImGui::TextUnformatted("val");
             ImNodes::EndOutputAttribute();
         }
-        if (n.kind != blueprint::NK::IntLit &&
-            n.kind != blueprint::NK::BoolLit &&
-            n.kind != blueprint::NK::VarGet &&
-            n.kind != blueprint::NK::Unary &&
-            n.kind != blueprint::NK::Binary &&
-            n.kind != blueprint::NK::CallExpr) {
+        if (!is_value_node(n.kind)) {  // exec node (incl. Entry)
             ImNodes::BeginOutputAttribute(pin(ni, kExecOut));
             ImGui::TextUnformatted("next");
             ImNodes::EndOutputAttribute();

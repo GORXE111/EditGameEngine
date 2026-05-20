@@ -14,7 +14,11 @@ namespace farm::lang {
 using NodeId = uint32_t;
 constexpr NodeId kNoNode = 0;
 
-enum class ExprKind { IntLit, BoolLit, Ident, Unary, Binary, Call };
+enum class ExprKind {
+    IntLit, BoolLit, Ident, Unary, Binary, Call,
+    ListLit,  // [e0, e1, ...]  -> args
+    Index     // lhs[rhs]
+};
 
 struct Expr {
     NodeId id = kNoNode;
@@ -31,7 +35,10 @@ struct Expr {
     std::vector<std::unique_ptr<Expr>> args;   // Call arguments
 };
 
-enum class StmtKind { Assign, If, While, Repeat, FuncDecl, Return, ExprStmt };
+enum class StmtKind {
+    Assign, If, While, Repeat, FuncDecl, Return, ExprStmt,
+    SetIndex  // target (an Index expr) = expr
+};
 
 struct Stmt {
     NodeId id = kNoNode;
@@ -41,8 +48,10 @@ struct Stmt {
     std::string name;                  // Assign target / FuncDecl name
     std::vector<std::string> params;   // FuncDecl parameters
 
-    // Assign value / If|While cond / Repeat count / Return value / ExprStmt.
+    // Assign value / If|While cond / Repeat count / Return value /
+    // ExprStmt / SetIndex value.
     std::unique_ptr<Expr> expr;
+    std::unique_ptr<Expr> target;      // SetIndex: the Index lvalue
     bool has_value = false;            // Return: whether expr is present
 
     std::vector<std::unique_ptr<Stmt>> body;       // then / loop / func body

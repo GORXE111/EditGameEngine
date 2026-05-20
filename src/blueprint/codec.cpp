@@ -52,6 +52,20 @@ struct Builder {
                 g.nodes[idx].in = std::move(args);
                 break;
             }
+            case ExprKind::ListLit: {
+                idx = g.add(NK::ListLit).id;
+                std::vector<int> els;
+                for (auto& a : e.args) els.push_back(expr(*a));
+                g.nodes[idx].in = std::move(els);
+                break;
+            }
+            case ExprKind::Index: {
+                idx = g.add(NK::IndexGet).id;
+                int c = expr(*e.lhs);
+                int i = expr(*e.rhs);
+                g.nodes[idx].in = {c, i};
+                break;
+            }
         }
         Node& n = g.nodes[idx];
         n.ast_id = e.id;
@@ -89,6 +103,14 @@ struct Builder {
                     g.nodes[idx].in = std::move(args);
                 }
                 break;
+            case StmtKind::SetIndex: {
+                idx = g.add(NK::SetIndex).id;
+                int c = expr(*s.target->lhs);
+                int i = expr(*s.target->rhs);
+                int v = expr(*s.expr);
+                g.nodes[idx].in = {c, i, v};
+                break;
+            }
             case StmtKind::If: {
                 idx = g.add(NK::If).id;
                 g.nodes[idx].in = {expr(*s.expr)};
@@ -167,6 +189,15 @@ struct Rebuilder {
                 e->name = n.name;
                 for (int a : n.in) e->args.push_back(expr(a));
                 break;
+            case NK::ListLit:
+                e->kind = ExprKind::ListLit;
+                for (int a : n.in) e->args.push_back(expr(a));
+                break;
+            case NK::IndexGet:
+                e->kind = ExprKind::Index;
+                e->lhs = expr(n.in[0]);
+                e->rhs = expr(n.in[1]);
+                break;
             default:
                 e->kind = ExprKind::IntLit;  // unreachable for valid graphs
                 break;
@@ -193,6 +224,17 @@ struct Rebuilder {
                 s->name = n.name;
                 s->expr = expr(n.in[0]);
                 break;
+            case NK::SetIndex: {
+                s->kind = StmtKind::SetIndex;
+                auto tgt = std::make_unique<Expr>();
+                tgt->id = n.ast_id;
+                tgt->kind = ExprKind::Index;
+                tgt->lhs = expr(n.in[0]);
+                tgt->rhs = expr(n.in[1]);
+                s->target = std::move(tgt);
+                s->expr = expr(n.in[2]);
+                break;
+            }
             case NK::CallStmt: {
                 s->kind = StmtKind::ExprStmt;
                 auto call = std::make_unique<Expr>();

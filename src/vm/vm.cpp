@@ -81,6 +81,24 @@ void VM::exec_binary(Op op) {
     }
 }
 
+bool VM::builtin(const std::string& name, const std::vector<Value>& args,
+                 Value& out) {
+    if (name == "len") {
+        if (args.size() != 1 || !args[0].is_list())
+            rterr("len(list) expected");
+        out = Value::I(static_cast<int64_t>(args[0].list->size()));
+        return true;
+    }
+    if (name == "append") {
+        if (args.size() != 2 || !args[0].is_list())
+            rterr("append(list, value) expected");
+        args[0].list->push_back(args[1]);
+        out = Value::I(0);
+        return true;
+    }
+    return false;
+}
+
 VM::RunResult VM::run(int64_t budget) {
     uint64_t steps = 0;
     if (finished_) return {Status::Completed, result_, 0};
@@ -148,6 +166,14 @@ VM::RunResult VM::run(int64_t budget) {
             case Op::Call: {
                 const std::string& nm = c_.names[in.a];
                 int argc = in.b;
+                if (nm == "len" || nm == "append") {  // language builtins
+                    std::vector<Value> args(argc);
+                    for (int i = argc - 1; i >= 0; --i) args[i] = pop();
+                    Value b;
+                    builtin(nm, args, b);
+                    push(b);
+                    break;
+                }
                 auto fit = c_.func_index.find(nm);
                 if (fit == c_.func_index.end()) {
                     // native
@@ -182,6 +208,38 @@ VM::RunResult VM::run(int64_t budget) {
                 } else {
                     push(rv);
                 }
+                break;
+            }
+            case Op::MakeList: {
+                auto v = std::make_shared<std::vector<Value>>(
+                    static_cast<size_t>(in.a));
+                for (int k = in.a - 1; k >= 0; --k)
+                    (*v)[static_cast<size_t>(k)] = pop();
+                push(Value::L(std::move(v)));
+                break;
+            }
+            case Op::IndexGet: {
+                Value ix = pop();
+                Value c = pop();
+                if (!c.is_list()) rterr("indexing requires a list");
+                if (!ix.is_int()) rterr("list index must be an int");
+                if (ix.i < 0 ||
+                    ix.i >= static_cast<int64_t>(c.list->size()))
+                    rterr("list index out of range");
+                push((*c.list)[static_cast<size_t>(ix.i)]);
+                break;
+            }
+            case Op::IndexSet: {
+                Value val = pop();
+                Value ix = pop();
+                Value c = pop();
+                if (!c.is_list())
+                    rterr("indexed assignment requires a list");
+                if (!ix.is_int()) rterr("list index must be an int");
+                if (ix.i < 0 ||
+                    ix.i >= static_cast<int64_t>(c.list->size()))
+                    rterr("list index out of range");
+                (*c.list)[static_cast<size_t>(ix.i)] = val;
                 break;
             }
             case Op::Halt:

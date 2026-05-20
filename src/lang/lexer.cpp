@@ -27,6 +27,8 @@ const char* tok_name(Tok k) {
         case Tok::KwNot: return "not";
         case Tok::LParen: return "(";
         case Tok::RParen: return ")";
+        case Tok::LBracket: return "[";
+        case Tok::RBracket: return "]";
         case Tok::Comma: return ",";
         case Tok::Assign: return "=";
         case Tok::Eq: return "==";
@@ -143,6 +145,8 @@ std::vector<Token> lex(const std::string& src) {
         switch (ch) {
             case '(': push(Tok::LParen, l, col); break;
             case ')': push(Tok::RParen, l, col); break;
+            case '[': push(Tok::LBracket, l, col); break;
+            case ']': push(Tok::RBracket, l, col); break;
             case ',': push(Tok::Comma, l, col); break;
             case '+': push(Tok::Plus, l, col); break;
             case '-': push(Tok::Minus, l, col); break;

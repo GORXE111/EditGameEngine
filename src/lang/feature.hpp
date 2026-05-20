@@ -14,6 +14,7 @@ enum class Feature : uint32_t {
     Loops        = 1u << 1,  // while
     RepeatLoop   = 1u << 2,  // repeat N do
     Functions    = 1u << 3,  // func declarations + user calls
+    Lists        = 1u << 4,  // list literals / indexing / len / append
 };
 
 struct FeatureSet {
@@ -23,7 +24,8 @@ struct FeatureSet {
         return FeatureSet{ (uint32_t)Feature::Conditionals |
                            (uint32_t)Feature::Loops |
                            (uint32_t)Feature::RepeatLoop |
-                           (uint32_t)Feature::Functions };
+                           (uint32_t)Feature::Functions |
+                           (uint32_t)Feature::Lists };
     }
     static FeatureSet none() { return FeatureSet{0}; }
 

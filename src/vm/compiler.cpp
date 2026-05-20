@@ -72,6 +72,15 @@ struct Compiler {
             case ExprKind::Binary:
                 binary(e);
                 return;
+            case ExprKind::ListLit:
+                for (auto& a : e.args) expr(*a);
+                emit(Op::MakeList, static_cast<int32_t>(e.args.size()));
+                return;
+            case ExprKind::Index:
+                expr(*e.lhs);
+                expr(*e.rhs);
+                emit(Op::IndexGet);
+                return;
         }
     }
 
@@ -125,6 +134,12 @@ struct Compiler {
             case StmtKind::ExprStmt:
                 expr(*s.expr);
                 emit(Op::Pop);
+                return;
+            case StmtKind::SetIndex:
+                expr(*s.target->lhs);  // collection
+                expr(*s.target->rhs);  // index
+                expr(*s.expr);         // value
+                emit(Op::IndexSet);
                 return;
             case StmtKind::Return:
                 if (s.has_value) { expr(*s.expr); emit(Op::Ret, 0, 1); }

@@ -22,6 +22,7 @@ enum Unlock : int {
     U_Pumpkin,           // content: pumpkin crop (high yield)
     U_Polyculture,       // mechanic: companion-planting yield bonus
     U_Drones,            // multi-drone (shared program)
+    U_Lists,             // language: arrays/lists ([], indexing, len/append)
     U_COUNT
 };
 

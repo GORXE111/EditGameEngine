@@ -13,7 +13,7 @@ enum class Tok {
     KwIf, KwThen, KwElse, KwEnd, KwWhile, KwDo, KwRepeat,
     KwFunc, KwReturn, KwTrue, KwFalse, KwAnd, KwOr, KwNot,
     // punctuation
-    LParen, RParen, Comma,
+    LParen, RParen, LBracket, RBracket, Comma,
     // operators
     Assign,                       // =
     Eq, Ne, Lt, Le, Gt, Ge,      // == != < <= > >=

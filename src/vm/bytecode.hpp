@@ -27,6 +27,9 @@ enum class Op : uint8_t {
     Call,       // a = name index, b = argc
     Ret,        // b = 1 if a value is on stack, else 0
     Halt,       // end of @main
+    MakeList,   // a = element count; pop a -> push list
+    IndexGet,   // pop idx, coll -> push coll[idx]
+    IndexSet,   // pop value, idx, coll ; coll[idx] = value
 };
 
 struct Instr {

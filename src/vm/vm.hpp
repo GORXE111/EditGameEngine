@@ -53,6 +53,9 @@ private:
     farm::lang::Value* resolve(Frame& f, const std::string& name);
     void do_store(Frame& f, const std::string& name, farm::lang::Value v);
     void exec_binary(Op op);
+    bool builtin(const std::string& name,
+                 const std::vector<farm::lang::Value>& args,
+                 farm::lang::Value& out);
 };
 
 // Convenience: compile + run to completion, returning the program result.

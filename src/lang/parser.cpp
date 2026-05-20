@@ -91,7 +91,21 @@ struct Parser {
             u->rhs = parse_unary();
             return u;
         }
-        return parse_primary();
+        return parse_postfix();
+    }
+
+    // primary followed by zero or more `[index]` subscripts
+    ExprPtr parse_postfix() {
+        ExprPtr e = parse_primary();
+        while (at(Tok::LBracket)) {
+            auto ix = mkexpr(ExprKind::Index);
+            advance();  // [
+            ix->lhs = std::move(e);
+            ix->rhs = parse_expr();
+            expect(Tok::RBracket, "']'");
+            e = std::move(ix);
+        }
+        return e;
     }
 
     ExprPtr parse_primary() {
@@ -110,6 +124,19 @@ struct Parser {
             advance();
             ExprPtr e = parse_expr();
             expect(Tok::RParen, "')'");
+            return e;
+        }
+        if (t.kind == Tok::LBracket) {  // list literal [e0, e1, ...]
+            auto e = mkexpr(ExprKind::ListLit);
+            advance();  // [
+            if (!at(Tok::RBracket)) {
+                e->args.push_back(parse_expr());
+                while (at(Tok::Comma)) {
+                    advance();
+                    e->args.push_back(parse_expr());
+                }
+            }
+            expect(Tok::RBracket, "']'");
             return e;
         }
         if (t.kind == Tok::Ident) {
@@ -158,15 +185,28 @@ struct Parser {
             case Tok::KwReturn: return parse_return();
             default: break;
         }
-        if (at(Tok::Ident) && peek(1).kind == Tok::Assign) {
-            auto s = mkstmt(StmtKind::Assign);
-            s->name = advance().text;  // ident
-            advance();                 // =
-            s->expr = parse_expr();
-            return s;
+        // Parse an expression; if followed by '=', it's an assignment whose
+        // target must be an Ident (Assign) or an Index (SetIndex).
+        ExprPtr e = parse_expr();
+        if (at(Tok::Assign)) {
+            advance();  // =
+            if (e->kind == ExprKind::Ident) {
+                auto s = mkstmt(StmtKind::Assign);
+                s->id = e->id;
+                s->name = e->name;
+                s->expr = parse_expr();
+                return s;
+            }
+            if (e->kind == ExprKind::Index) {
+                auto s = mkstmt(StmtKind::SetIndex);
+                s->target = std::move(e);
+                s->expr = parse_expr();
+                return s;
+            }
+            err("invalid assignment target");
         }
         auto s = mkstmt(StmtKind::ExprStmt);
-        s->expr = parse_expr();
+        s->expr = std::move(e);
         return s;
     }
 

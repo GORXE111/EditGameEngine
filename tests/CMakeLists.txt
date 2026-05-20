@@ -11,6 +11,7 @@ add_executable(farmcode_tests
   test_progress.cpp
   test_enhance.cpp
   test_fleet.cpp
+  test_lists.cpp
 )
 target_include_directories(farmcode_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(farmcode_tests PRIVATE
