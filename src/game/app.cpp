@@ -8,6 +8,7 @@
 #include "imnodes.h"
 #include "blueprint/codec.hpp"
 #include "game/i18n.hpp"
+#include "game/recipes.hpp"
 #include "lang/parser.hpp"
 #include "lang/printer.hpp"
 #include "vm/compiler.hpp"
@@ -103,6 +104,16 @@ bool App::do_round() {
 
 // Text edit -> re-derive the blueprint, preserving node positions by AST id.
 // Does not touch the running VM/world (only Apply/Reset does).
+// Append a recipe snippet to the source and rebuild. Player workflow:
+// pick a recipe in the panel -> snippet lands at the end of the program ->
+// VM/world reset so they can immediately Run it.
+void App::insert_recipe(const char* snippet) {
+    if (!source_.empty() && source_.back() != '\n') source_ += '\n';
+    source_ += '\n';
+    source_ += snippet;
+    rebuild();
+}
+
 void App::resync_graph() {
     try {
         lang::Program prog = lang::parse(source_, prog_.feature_set());
@@ -553,6 +564,21 @@ void App::draw_blueprint() {
     ImGui::SetNextWindowSize({392, 754}, ImGuiCond_FirstUseEver);
     ImGui::Begin(wtitle("panel.blueprint", "bp"));
 
+    if (!ImGui::BeginTabBar("bp_tabs")) { ImGui::End(); return; }
+
+    // ---- Recipes tab (player-facing entry point) ----
+    if (ImGui::BeginTabItem(Loc::tr("tab.recipes"))) {
+        draw_recipes();
+        ImGui::EndTabItem();
+    }
+
+    // ---- Graph tab (advanced node-graph view) ----
+    if (!ImGui::BeginTabItem(Loc::tr("tab.graph"))) {
+        ImGui::EndTabBar();
+        ImGui::End();
+        return;
+    }
+
     if (ImGui::Button(Loc::tr("btn.apply_bp"))) {
         try {
             source_ = lang::print(blueprint::to_ast(graph_));
@@ -688,7 +714,53 @@ void App::draw_blueprint() {
             error_ = e.what();
         }
     }
+    ImGui::EndTabItem();    // close "Graph" tab
+    ImGui::EndTabBar();     // close bp_tabs
     ImGui::End();
+}
+
+// Player-facing recipe library: pick a curated snippet, click Insert,
+// snippet is appended to the program. Recipes whose required tech is not
+// yet unlocked are disabled and show what's missing.
+void App::draw_recipes() {
+    ImGui::TextWrapped("%s", Loc::tr("hint.recipes"));
+    ImGui::Separator();
+    ImGui::BeginChild("recipes_scroll");
+    for (const Recipe& r : recipes()) {
+        const bool ok = recipe_available(r, prog_);
+        ImGui::PushID(r.id);
+        // title
+        std::string tk = std::string("recipe.") + r.id + ".title";
+        std::string dk = std::string("recipe.") + r.id + ".desc";
+        const char* title = Loc::tr(tk.c_str());
+        const char* desc  = Loc::tr(dk.c_str());
+
+        if (!ok) ImGui::BeginDisabled();
+        if (ImGui::Button(Loc::tr("btn.insert")))
+            insert_recipe(r.snippet);
+        if (!ok) ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::TextUnformatted(title);
+        ImGui::Indent(20.f);
+        ImGui::TextDisabled("%s", desc);
+        if (!r.needs.empty()) {
+            std::string need = Loc::tr("recipe.locked_need");
+            for (size_t i = 0; i < r.needs.size(); ++i) {
+                if (i) need += ", ";
+                const sim::UnlockDef& d = sim::Progression::def(r.needs[i]);
+                need += tech_name(d.name);
+                if (!prog_.is_unlocked(r.needs[i])) need += " ✗";
+                else                                need += " ✓";
+            }
+            ImVec4 col = ok ? ImVec4(0.50f, 0.75f, 0.50f, 1)
+                            : ImVec4(0.83f, 0.66f, 0.24f, 1);
+            ImGui::TextColored(col, "%s", need.c_str());
+        }
+        ImGui::Unindent(20.f);
+        ImGui::Separator();
+        ImGui::PopID();
+    }
+    ImGui::EndChild();
 }
 
 void App::draw_tech() {

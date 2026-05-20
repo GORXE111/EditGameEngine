@@ -33,6 +33,8 @@ private:
     void draw_farm();
     void draw_blueprint();
     void draw_tech();               // unlock tree (progression)
+    void draw_recipes();            // player-facing recipe library
+    void insert_recipe(const char* snippet);  // append + rebuild
 
     std::string source_;
     std::string status_;
