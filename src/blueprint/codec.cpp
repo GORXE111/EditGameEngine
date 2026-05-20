@@ -1,7 +1,67 @@
 #include "blueprint/codec.hpp"
 
+#include "lang/value.hpp"  // RuntimeError
+
 namespace farm::blueprint {
 using namespace farm::lang;
+
+int default_arity(NK k) {
+    switch (k) {
+        case NK::Assign:    return 1;
+        case NK::If:        return 1;
+        case NK::While:     return 1;
+        case NK::Repeat:    return 1;
+        case NK::Return:    return 1;  // optional; -1 leaves it value-less
+        case NK::Unary:     return 1;
+        case NK::Binary:    return 2;
+        case NK::IndexGet:  return 2;
+        case NK::SetIndex:  return 3;
+        default:            return 0;  // Entry/Call*/Lit/VarGet/ListLit
+    }
+}
+
+int native_arity(const std::string& n) {
+    if (n == "move" || n == "plant" || n == "inventory" ||
+        n == "num_items" || n == "unlock" || n == "get_cost" ||
+        n == "num_unlocked" || n == "len")
+        return 1;
+    if (n == "append") return 2;
+    return 0;  // till / water / fertilize / harvest / wait / sense / pos /
+               // can_harvest / get_drone_id / num_drones / unknown
+}
+
+int spawn(Graph& g, NK k) {
+    Node& n = g.add(k);
+    n.in.assign(default_arity(k), -1);
+    return n.id;
+}
+
+void compact(Graph& g) {
+    const int N = static_cast<int>(g.nodes.size());
+    std::vector<int> remap(N, -1);
+    int next = 0;
+    for (int i = 0; i < N; ++i)
+        if (!g.nodes[i].deleted) remap[i] = next++;
+
+    auto remap_one = [&](int& idx) {
+        idx = (idx >= 0 && idx < N) ? remap[idx] : -1;
+    };
+
+    std::vector<Node> out;
+    out.reserve(next);
+    for (int i = 0; i < N; ++i) {
+        if (g.nodes[i].deleted) continue;
+        Node m = std::move(g.nodes[i]);
+        remap_one(m.exec_next);
+        remap_one(m.body);
+        remap_one(m.els);
+        for (auto& v : m.in) remap_one(v);
+        m.id = static_cast<int>(out.size());
+        out.push_back(std::move(m));
+    }
+    if (g.entry >= 0 && g.entry < N) g.entry = remap[g.entry];
+    g.nodes = std::move(out);
+}
 
 namespace {
 
@@ -153,8 +213,54 @@ struct Builder {
     }
 };
 
+// Tiny helper: a friendly node description for error messages.
+static std::string node_desc(const Node& n) {
+    switch (n.kind) {
+        case NK::Entry:    return "Entry";
+        case NK::Assign:   return "Set '" + n.name + "'";
+        case NK::CallStmt: case NK::CallExpr:
+            return n.name + "()";
+        case NK::If:       return "If";
+        case NK::While:    return "While";
+        case NK::Repeat:   return "Repeat";
+        case NK::Return:   return "Return";
+        case NK::FuncDef:  return "func " + n.name;
+        case NK::SetIndex: return "Set Element";
+        case NK::IntLit:   return std::to_string(n.ival);
+        case NK::BoolLit:  return n.bval ? "true" : "false";
+        case NK::VarGet:   return n.name;
+        case NK::Unary:    return "(unary)";
+        case NK::Binary:   return "(binary)";
+        case NK::ListLit:  return "[list]";
+        case NK::IndexGet: return "(index)";
+    }
+    return "(node)";
+}
+
 struct Rebuilder {
     const Graph& g;
+
+    // Validate an index into g.nodes. Throws RuntimeError with a player-
+    // facing message naming the host node and the missing role.
+    const Node& deref(int idx, const Node& host, const char* role) {
+        if (idx < 0) {
+            throw RuntimeError("blueprint: '" + node_desc(host) +
+                               "' is missing a wire on '" + role + "'");
+        }
+        if (idx >= static_cast<int>(g.nodes.size()) ||
+            g.nodes[idx].deleted) {
+            throw RuntimeError("blueprint: '" + node_desc(host) +
+                               "' wire on '" + role + "' targets a "
+                               "deleted node");
+        }
+        return g.nodes[idx];
+    }
+
+    // expr-in-host: validate idx wrt host node + role, then build expr().
+    ExprPtr expr_in(const Node& host, int idx, const char* role) {
+        deref(idx, host, role);
+        return expr(idx);
+    }
 
     ExprPtr expr(int idx) {
         const Node& n = g.nodes[idx];
@@ -176,27 +282,29 @@ struct Rebuilder {
             case NK::Unary:
                 e->kind = ExprKind::Unary;
                 e->op = n.op;
-                e->rhs = expr(n.in[0]);
+                e->rhs = expr_in(n, n.in.empty() ? -1 : n.in[0], "x");
                 break;
             case NK::Binary:
                 e->kind = ExprKind::Binary;
                 e->op = n.op;
-                e->lhs = expr(n.in[0]);
-                e->rhs = expr(n.in[1]);
+                e->lhs = expr_in(n, n.in.size() > 0 ? n.in[0] : -1, "a");
+                e->rhs = expr_in(n, n.in.size() > 1 ? n.in[1] : -1, "b");
                 break;
             case NK::CallExpr:
                 e->kind = ExprKind::Call;
                 e->name = n.name;
-                for (int a : n.in) e->args.push_back(expr(a));
+                for (size_t k = 0; k < n.in.size(); ++k)
+                    e->args.push_back(expr_in(n, n.in[k], "arg"));
                 break;
             case NK::ListLit:
                 e->kind = ExprKind::ListLit;
-                for (int a : n.in) e->args.push_back(expr(a));
+                for (size_t k = 0; k < n.in.size(); ++k)
+                    e->args.push_back(expr_in(n, n.in[k], "element"));
                 break;
             case NK::IndexGet:
                 e->kind = ExprKind::Index;
-                e->lhs = expr(n.in[0]);
-                e->rhs = expr(n.in[1]);
+                e->lhs = expr_in(n, n.in.size() > 0 ? n.in[0] : -1, "list");
+                e->rhs = expr_in(n, n.in.size() > 1 ? n.in[1] : -1, "index");
                 break;
             default:
                 e->kind = ExprKind::IntLit;  // unreachable for valid graphs
@@ -208,6 +316,10 @@ struct Rebuilder {
     std::vector<StmtPtr> chain(int idx) {
         std::vector<StmtPtr> out;
         while (idx != -1) {
+            if (idx < 0 || idx >= static_cast<int>(g.nodes.size()) ||
+                g.nodes[idx].deleted)
+                throw RuntimeError(
+                    "blueprint: exec chain reaches a deleted node");
             out.push_back(stmt(idx));
             idx = g.nodes[idx].exec_next;
         }
@@ -222,17 +334,20 @@ struct Rebuilder {
             case NK::Assign:
                 s->kind = StmtKind::Assign;
                 s->name = n.name;
-                s->expr = expr(n.in[0]);
+                s->expr = expr_in(n, n.in.empty() ? -1 : n.in[0], "value");
                 break;
             case NK::SetIndex: {
                 s->kind = StmtKind::SetIndex;
                 auto tgt = std::make_unique<Expr>();
                 tgt->id = n.ast_id;
                 tgt->kind = ExprKind::Index;
-                tgt->lhs = expr(n.in[0]);
-                tgt->rhs = expr(n.in[1]);
+                tgt->lhs = expr_in(n, n.in.size() > 0 ? n.in[0] : -1,
+                                   "list");
+                tgt->rhs = expr_in(n, n.in.size() > 1 ? n.in[1] : -1,
+                                   "index");
                 s->target = std::move(tgt);
-                s->expr = expr(n.in[2]);
+                s->expr = expr_in(n, n.in.size() > 2 ? n.in[2] : -1,
+                                  "value");
                 break;
             }
             case NK::CallStmt: {
@@ -241,30 +356,37 @@ struct Rebuilder {
                 call->id = n.ast_id;
                 call->kind = ExprKind::Call;
                 call->name = n.name;
-                for (int a : n.in) call->args.push_back(expr(a));
+                for (size_t k = 0; k < n.in.size(); ++k)
+                    call->args.push_back(expr_in(n, n.in[k], "arg"));
                 s->expr = std::move(call);
                 break;
             }
             case NK::If:
                 s->kind = StmtKind::If;
-                s->expr = expr(n.in[0]);
+                s->expr = expr_in(n, n.in.empty() ? -1 : n.in[0], "cond");
                 s->body = chain(n.body);
                 s->else_body = chain(n.els);
                 break;
             case NK::While:
                 s->kind = StmtKind::While;
-                s->expr = expr(n.in[0]);
+                s->expr = expr_in(n, n.in.empty() ? -1 : n.in[0], "cond");
                 s->body = chain(n.body);
                 break;
             case NK::Repeat:
                 s->kind = StmtKind::Repeat;
-                s->expr = expr(n.in[0]);
+                s->expr = expr_in(n, n.in.empty() ? -1 : n.in[0], "count");
                 s->body = chain(n.body);
                 break;
             case NK::Return:
                 s->kind = StmtKind::Return;
-                s->has_value = n.has_value;
-                if (n.has_value) s->expr = expr(n.in[0]);
+                // Treat "value pin wired" as has-value, regardless of the
+                // historical flag (lets the player toggle by wiring/unwiring).
+                if (!n.in.empty() && n.in[0] != -1) {
+                    s->has_value = true;
+                    s->expr = expr_in(n, n.in[0], "value");
+                } else {
+                    s->has_value = false;
+                }
                 break;
             case NK::FuncDef:
                 s->kind = StmtKind::FuncDecl;

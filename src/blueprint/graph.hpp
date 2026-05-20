@@ -29,6 +29,7 @@ struct Node {
     farm::lang::NodeId ast_id = farm::lang::kNoNode;
     int id = -1;       // graph-local id == index in Graph::nodes
     NK kind;
+    bool deleted = false;  // tombstone: graph compaction happens on Apply
 
     std::string name;                   // Assign target / VarGet / call name
                                         // / FuncDef name

@@ -581,21 +581,24 @@ void App::draw_blueprint() {
 
     if (ImGui::Button(Loc::tr("btn.apply_bp"))) {
         try {
+            blueprint::compact(graph_);    // drop tombstones + remap indices
+            link_table_.clear();           // ids change after compact
             source_ = lang::print(blueprint::to_ast(graph_));
             rebuild();
         } catch (const std::exception& e) {
             error_ = e.what();
         }
     }
-    ImGui::SameLine();
-    ImGui::TextDisabled("%s", Loc::tr("hint.bp_edit"));
+    ImGui::TextWrapped("%s", Loc::tr("hint.bp_edit_full"));
 
     bool edited = false;
+    link_table_.clear();
     ImNodes::BeginNodeEditor();
     auto& ns = graph_.nodes;
 
     for (size_t i = 0; i < ns.size(); ++i) {
         blueprint::Node& n = ns[i];
+        if (n.deleted) continue;                          // tombstoned
         int ni = static_cast<int>(i);
         if (!graph_laid_)
             ImNodes::SetNodeGridSpacePos(ni, ImVec2(n.x, n.y));
@@ -675,29 +678,40 @@ void App::draw_blueprint() {
         ImNodes::PopColorStyle();
     }
 
-    int link_id = 0;
+    auto live = [&](int idx) {
+        return idx >= 0 && idx < (int)ns.size() && !ns[idx].deleted;
+    };
+    auto emit = [&](int from_pin, int to_pin, EdgeRef::Kind k, int owner,
+                    int slot) {
+        ImNodes::Link((int)link_table_.size(), from_pin, to_pin);
+        link_table_.push_back({k, owner, slot});
+    };
     for (size_t i = 0; i < ns.size(); ++i) {
         const blueprint::Node& n = ns[i];
+        if (n.deleted) continue;
         int ni = static_cast<int>(i);
-        if (n.exec_next != -1)
-            ImNodes::Link(link_id++, pin(ni, kExecOut),
-                          pin(n.exec_next, kExecIn));
-        if (n.body != -1)
-            ImNodes::Link(link_id++, pin(ni, kBranchA),
-                          pin(n.body, kExecIn));
-        if (n.els != -1)
-            ImNodes::Link(link_id++, pin(ni, kBranchB),
-                          pin(n.els, kExecIn));
+        if (live(n.exec_next))
+            emit(pin(ni, kExecOut), pin(n.exec_next, kExecIn),
+                 EdgeRef::Exec, ni, 0);
+        if (live(n.body))
+            emit(pin(ni, kBranchA), pin(n.body, kExecIn),
+                 EdgeRef::Then, ni, 0);
+        if (live(n.els))
+            emit(pin(ni, kBranchB), pin(n.els, kExecIn),
+                 EdgeRef::Els, ni, 0);
         for (size_t k = 0; k < n.in.size(); ++k)
-            ImNodes::Link(link_id++, pin(n.in[k], kValOut),
-                          pin(ni, kValIn0 + (int)k));
+            if (live(n.in[k]))
+                emit(pin(n.in[k], kValOut), pin(ni, kValIn0 + (int)k),
+                     EdgeRef::ValIn, ni, (int)k);
     }
 
     ImNodes::EndNodeEditor();
+    handle_graph_edits();
 
     // Capture user-dragged positions back into the graph + layout store so
     // they survive the next re-derive (layout keyed by AST id).
     for (size_t i = 0; i < ns.size(); ++i) {
+        if (ns[i].deleted) continue;  // not rendered -> imnodes has no pos
         ImVec2 p = ImNodes::GetNodeGridSpacePos(static_cast<int>(i));
         ns[i].x = p.x;
         ns[i].y = p.y;
@@ -800,6 +814,219 @@ void App::draw_tech() {
     ImGui::Separator();
     ImGui::TextWrapped("%s", Loc::tr("hint.unlock_code"));
     ImGui::End();
+}
+
+// ---- E4 structural editing ----
+void App::handle_graph_edits() {
+    auto& ns = graph_.nodes;
+    const int N = static_cast<int>(ns.size());
+    auto in_range = [&](int idx) {
+        return idx >= 0 && idx < N && !ns[idx].deleted;
+    };
+    auto is_out_slot = [](int s) {
+        return s == kExecOut || s == kBranchA || s == kBranchB ||
+               s == kValOut;
+    };
+
+    // 1) wire created (player dragged pin -> pin)
+    int from = 0, to = 0;
+    if (ImNodes::IsLinkCreated(&from, &to)) {
+        int a_slot = from % 64, a_node = from / 64;
+        int b_slot = to % 64,   b_node = to / 64;
+        bool a_out = is_out_slot(a_slot), b_out = is_out_slot(b_slot);
+        if (a_out != b_out) {  // one in, one out
+            int sn = a_out ? a_node : b_node, ss = a_out ? a_slot : b_slot;
+            int dn = a_out ? b_node : a_node, ds = a_out ? b_slot : a_slot;
+            if (in_range(sn) && in_range(dn)) {
+                if (ds == kExecIn) {
+                    if (ss == kExecOut)      ns[sn].exec_next = dn;
+                    else if (ss == kBranchA) ns[sn].body      = dn;
+                    else if (ss == kBranchB) ns[sn].els       = dn;
+                } else if (ds >= kValIn0 && ss == kValOut) {
+                    int k = ds - kValIn0;
+                    auto& v = ns[dn].in;
+                    if (k >= 0 && k < (int)v.size()) v[k] = sn;
+                }
+            }
+        }
+    }
+
+    // 2) wire destroyed (detach drag, or implicit replace)
+    int gone = 0;
+    if (ImNodes::IsLinkDestroyed(&gone)) {
+        if (gone >= 0 && gone < (int)link_table_.size()) {
+            const EdgeRef e = link_table_[gone];
+            if (in_range(e.owner)) {
+                auto& n = ns[e.owner];
+                switch (e.kind) {
+                    case EdgeRef::Exec: n.exec_next = -1; break;
+                    case EdgeRef::Then: n.body      = -1; break;
+                    case EdgeRef::Els:  n.els       = -1; break;
+                    case EdgeRef::ValIn:
+                        if (e.slot >= 0 && e.slot < (int)n.in.size())
+                            n.in[e.slot] = -1;
+                        break;
+                }
+            }
+        }
+    }
+
+    // 3) Delete key — only while the blueprint window has focus
+    if (ImGui::IsWindowFocused() &&
+        ImGui::IsKeyPressed(ImGuiKey_Delete, false)) {
+        if (int nl = ImNodes::NumSelectedLinks(); nl > 0) {
+            std::vector<int> sel(nl);
+            ImNodes::GetSelectedLinks(sel.data());
+            for (int lid : sel) {
+                if (lid < 0 || lid >= (int)link_table_.size()) continue;
+                const EdgeRef e = link_table_[lid];
+                if (!in_range(e.owner)) continue;
+                auto& n = ns[e.owner];
+                switch (e.kind) {
+                    case EdgeRef::Exec: n.exec_next = -1; break;
+                    case EdgeRef::Then: n.body      = -1; break;
+                    case EdgeRef::Els:  n.els       = -1; break;
+                    case EdgeRef::ValIn:
+                        if (e.slot >= 0 && e.slot < (int)n.in.size())
+                            n.in[e.slot] = -1;
+                        break;
+                }
+            }
+        }
+        if (int nn = ImNodes::NumSelectedNodes(); nn > 0) {
+            std::vector<int> sel(nn);
+            ImNodes::GetSelectedNodes(sel.data());
+            for (int idx : sel) {
+                if (idx < 0 || idx >= N) continue;
+                if (ns[idx].kind == blueprint::NK::Entry) continue;
+                ns[idx].deleted = true;
+            }
+            // clear refs to deleted from every remaining live node
+            for (auto& m : ns) {
+                if (m.deleted) continue;
+                if (m.exec_next >= 0 && m.exec_next < N &&
+                    ns[m.exec_next].deleted) m.exec_next = -1;
+                if (m.body >= 0 && m.body < N && ns[m.body].deleted)
+                    m.body = -1;
+                if (m.els >= 0 && m.els < N && ns[m.els].deleted) m.els = -1;
+                for (auto& v : m.in)
+                    if (v >= 0 && v < N && ns[v].deleted) v = -1;
+            }
+        }
+    }
+
+    // 4) Right-click empty area -> open palette popup
+    int dummy = 0;
+    bool over = ImNodes::IsPinHovered(&dummy) ||
+                ImNodes::IsNodeHovered(&dummy) ||
+                ImNodes::IsLinkHovered(&dummy);
+    if (ImNodes::IsEditorHovered() && !over &&
+        ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+        ImVec2 mp = ImGui::GetMousePos();
+        palette_screen_x_ = mp.x;
+        palette_screen_y_ = mp.y;
+        ImGui::OpenPopup("addnode");
+    }
+    draw_palette_popup();
+}
+
+void App::draw_palette_popup() {
+    if (!ImGui::BeginPopup("addnode")) return;
+    using NK = farm::blueprint::NK;
+    using Tok = farm::lang::Tok;
+
+    auto add = [&](NK k, const char* name = nullptr,
+                   Tok op = Tok::Plus) {
+        int idx = blueprint::spawn(graph_, k);
+        auto& n = graph_.nodes[idx];
+        if (name) {
+            n.name = name;
+            if (k == NK::CallStmt || k == NK::CallExpr)
+                n.in.assign(blueprint::native_arity(name), -1);
+        }
+        if (k == NK::Binary || k == NK::Unary) n.op = op;
+        if ((k == NK::VarGet || k == NK::Assign ||
+             k == NK::CallStmt || k == NK::CallExpr ||
+             k == NK::FuncDef) &&
+            n.name.empty())
+            n.name = "x";
+        ImNodes::SetNodeScreenSpacePos(
+            idx, ImVec2(palette_screen_x_, palette_screen_y_));
+    };
+
+    ImGui::TextDisabled("%s", Loc::tr("palette.title"));
+    ImGui::Separator();
+
+    if (ImGui::BeginMenu(Loc::tr("palette.flow"))) {
+        if (ImGui::MenuItem(Loc::tr("node.if")))     add(NK::If);
+        if (ImGui::MenuItem(Loc::tr("node.while")))  add(NK::While);
+        if (ImGui::MenuItem(Loc::tr("node.repeat"))) add(NK::Repeat);
+        if (ImGui::MenuItem(Loc::tr("node.return"))) add(NK::Return);
+        ImGui::EndMenu();
+    }
+    if (ImGui::BeginMenu(Loc::tr("palette.var"))) {
+        if (ImGui::MenuItem("Set / 赋值"))  add(NK::Assign);
+        if (ImGui::MenuItem("Get / 取变量")) add(NK::VarGet);
+        ImGui::EndMenu();
+    }
+    if (ImGui::BeginMenu(Loc::tr("palette.action"))) {
+        struct A { const char* n; const char* key; };
+        static const A items[] = {
+            {"move", "native.move"}, {"till", "native.till"},
+            {"plant", "native.plant"}, {"water", "native.water"},
+            {"fertilize", "native.fertilize"}, {"harvest", "native.harvest"},
+            {"wait", "native.wait"}, {"unlock", "native.unlock"}};
+        for (auto& it : items)
+            if (ImGui::MenuItem(Loc::tr(it.key))) add(NK::CallStmt, it.n);
+        ImGui::EndMenu();
+    }
+    if (ImGui::BeginMenu(Loc::tr("palette.sense"))) {
+        struct A { const char* n; const char* key; };
+        static const A items[] = {
+            {"sense", "native.sense"}, {"pos", "native.pos"},
+            {"can_harvest", "native.can_harvest"},
+            {"inventory", "native.inventory"},
+            {"num_items", "native.num_items"},
+            {"get_drone_id", "native.get_drone_id"},
+            {"num_drones", "native.num_drones"},
+            {"get_cost", "native.get_cost"},
+            {"num_unlocked", "native.num_unlocked"}};
+        for (auto& it : items)
+            if (ImGui::MenuItem(Loc::tr(it.key))) add(NK::CallExpr, it.n);
+        ImGui::EndMenu();
+    }
+    if (ImGui::BeginMenu(Loc::tr("palette.op"))) {
+        struct B { const char* lbl; Tok op; };
+        static const B bins[] = {
+            {"+", Tok::Plus},   {"-", Tok::Minus},   {"*", Tok::Star},
+            {"/", Tok::Slash},  {"%", Tok::Percent},
+            {"==", Tok::Eq},    {"!=", Tok::Ne},
+            {"<", Tok::Lt},     {"<=", Tok::Le},
+            {">", Tok::Gt},     {">=", Tok::Ge},
+            {"and", Tok::KwAnd},{"or", Tok::KwOr}};
+        for (auto& b : bins)
+            if (ImGui::MenuItem(b.lbl)) add(NK::Binary, nullptr, b.op);
+        ImGui::Separator();
+        if (ImGui::MenuItem("not"))    add(NK::Unary, nullptr, Tok::KwNot);
+        if (ImGui::MenuItem("-(neg)")) add(NK::Unary, nullptr, Tok::Minus);
+        ImGui::EndMenu();
+    }
+    if (ImGui::BeginMenu(Loc::tr("palette.lit"))) {
+        if (ImGui::MenuItem(Loc::tr("node.intlit")))  add(NK::IntLit);
+        if (ImGui::MenuItem(Loc::tr("node.boollit"))) add(NK::BoolLit);
+        ImGui::EndMenu();
+    }
+    if (ImGui::BeginMenu(Loc::tr("palette.list"))) {
+        if (ImGui::MenuItem(Loc::tr("node.listlit")))  add(NK::ListLit);
+        if (ImGui::MenuItem(Loc::tr("node.indexget"))) add(NK::IndexGet);
+        if (ImGui::MenuItem(Loc::tr("node.setindex"))) add(NK::SetIndex);
+        if (ImGui::MenuItem(Loc::tr("native.len")))
+            add(NK::CallExpr, "len");
+        if (ImGui::MenuItem(Loc::tr("native.append")))
+            add(NK::CallStmt, "append");
+        ImGui::EndMenu();
+    }
+    ImGui::EndPopup();
 }
 
 }  // namespace farm::game

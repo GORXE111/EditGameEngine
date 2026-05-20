@@ -35,6 +35,8 @@ private:
     void draw_tech();               // unlock tree (progression)
     void draw_recipes();            // player-facing recipe library
     void insert_recipe(const char* snippet);  // append + rebuild
+    void handle_graph_edits();      // wires/spawn/delete after EndNodeEditor
+    void draw_palette_popup();      // right-click palette to spawn nodes
 
     std::string source_;
     std::string status_;
@@ -53,6 +55,18 @@ private:
     blueprint::LayoutStore layout_; // node positions kept by AST id
     bool graph_laid_ = false;       // push codec layout once per (re)build
     bool src_dirty_ = false;        // text edited -> needs graph resync
+
+    // ---- E4 structural editing state ----
+    // Per-frame translation from imnodes link-id to graph edge it represents.
+    // Indexed by link_id (the int we pass to ImNodes::Link).
+    struct EdgeRef {
+        enum Kind { Exec, Then, Els, ValIn } kind;
+        int owner;   // node index that owns the edge slot
+        int slot;    // ValIn: index into Node.in[]; ignored otherwise
+    };
+    std::vector<EdgeRef> link_table_;
+    bool open_palette_ = false;
+    float palette_screen_x_ = 0, palette_screen_y_ = 0;
 };
 
 }  // namespace farm::game
